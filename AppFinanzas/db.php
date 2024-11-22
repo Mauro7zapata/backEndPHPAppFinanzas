@@ -1,5 +1,5 @@
 <?php
-$host = "https://auth-db1663.hstgr.io/";
+$host = "silver-lyrebird-843414.hostingersite.com";
 $user = "u214407853_mauro7dev";
 $password = "oJwyd~VIHf[2";
 $db = "u214407853_dbFinanzas";
