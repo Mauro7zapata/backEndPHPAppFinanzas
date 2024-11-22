@@ -1,8 +1,8 @@
 <?php
-$host = "bdidzco0unzuysu7jmce-mysql.services.clever-cloud.com";
-$user = "u4dw71da3y2wnydo";
-$password = "5EHl7uGP3gttYW1hiaRI";
-$db = "bdidzco0unzuysu7jmce";
+$host = "https://auth-db1663.hstgr.io/";
+$user = "u214407853_mauro7dev";
+$password = "oJwyd~VIHf[2";
+$db = "u214407853_dbFinanzas";
 
 $mysql = new mysqli($host, $user, $password, $db);
 
