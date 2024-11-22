@@ -1,7 +1,7 @@
 <?php
-$host = "silver-lyrebird-843414.hostingersite.com";
+$host = "srv1663.hstgr.io";
 $user = "u214407853_mauro7dev";
-$password = "oJwyd~VIHf[2";
+$password = "Oruam917.";
 $db = "u214407853_dbFinanzas";
 
 $mysql = new mysqli($host, $user, $password, $db);
