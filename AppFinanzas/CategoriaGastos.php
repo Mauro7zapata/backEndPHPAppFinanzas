@@ -97,24 +97,25 @@ function eliminarCategoriaGastos($id) {
     }
 }
 
-// Procesar acciones basadas en el formulario
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $accion = $_POST['accion'];
-    $tabla = "categoriasgastos";
+    // Detectar si la entrada es JSON
+    $contentType = isset($_SERVER["CONTENT_TYPE"]) ? $_SERVER["CONTENT_TYPE"] : '';
 
-    if ($accion == 'insertar') {
-        $data = $_POST;
-        unset($data['accion']);
-        unset($data['tabla']);
-        insertarCategoriaGastos($data);
-    } elseif ($accion == 'editar') {
-        $data = $_POST;
-        unset($data['accion']);
-        unset($data['tabla']);
-        editarCategoriaGastos($data);
-    } elseif ($accion == 'eliminar') {
-        $id = $_POST['id'];
-        eliminarCategoriaGastos($id);
+    if (strpos($contentType, "application/json") !== false) {
+        // Leer y decodificar el JSON
+        $input = json_decode(file_get_contents('php://input'), true);
+
+        // Verificar si el JSON es un array
+        if (is_array($input)) {
+            foreach ($input as $data) {
+                procesarAccion($data);
+            }
+        } else {
+            procesarAccion($input);
+        }
+    } else {
+        // Usar $_POST si no es JSON
+        procesarAccion($_POST);
     }
 }else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     // Obtener el ID del parámetro GET
@@ -125,6 +126,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         consultarCategoriasGastos(); // Si no se pasa un ID, consultar todos los registros
     }
 } 
+
+// Nueva función para procesar cada acción
+function procesarAccion($data) {
+    global $mysql;
+
+    if (isset($data['accion'])) {
+        $accion = $data['accion'];
+
+        if ($accion == 'insertar') {
+            unset($data['accion']);
+            insertarCategoriaGastos($data);
+        } elseif ($accion == 'editar') {
+            unset($data['accion']);
+            editarCategoriaGastos($data);
+        } elseif ($accion == 'eliminar') {
+            $id = $data['id'];
+            eliminarCategoriaGastos($id);
+        } else {
+            echo "Acción desconocida: $accion";
+        }
+    } else {
+        echo "No se especificó ninguna acción.";
+    }
+}
 
 // Cerrar conexión
 $mysql->close();
