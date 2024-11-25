@@ -81,6 +81,7 @@ function editarCategoriaGastos($data) {
     $query = "UPDATE categoriagastos SET NombreCategoria='".$data['NombreCategoria']."', ColorCategoria='".$data['ColorCategoria']."', ImagenCategoria='".$data['ImagenCategoria']."' WHERE idCategoriaGastos='".$data['id']."'";
     if ($mysql->query($query) === TRUE) {
         echo "Categoría de gasto actualizada correctamente.";
+        echo "query " . $query
     } else {
         echo "Error al actualizar la categoría de gasto: " . $mysql->error;
     }
