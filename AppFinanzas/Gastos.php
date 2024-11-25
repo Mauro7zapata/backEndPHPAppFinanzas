@@ -40,9 +40,10 @@ function consultarGastosPorMesYAnho($mes, $anho) {
 
     // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
-                    g.FechaPago,g.idPresupuesto 
+                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria
             FROM gastos g INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos
-            JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
+            INNER JOIN estados e ON g.IdEstado = e.idEstado
+            INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
             WHERE p.Mes = ? AND p.Anho = ?
             order by c.NombreCategoria";
 
@@ -78,7 +79,9 @@ function consultarGastosPorMesYAnho($mes, $anho) {
                 "IdEstado" => $row['IdEstado'],
                 "IdCategoria" => $row['IdCategoria'],
                 "FechaPago" => $row['FechaPago'],
-                "idPresupuesto" => $row['idPresupuesto']
+                "idPresupuesto" => $row['idPresupuesto'],
+                "NombreEstado" => $row['NombreEstado'],
+                "NombreCategoria" => $row['NombreCategoria']
             ];
         }
     }
