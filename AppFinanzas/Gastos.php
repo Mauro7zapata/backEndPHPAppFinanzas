@@ -78,9 +78,7 @@ function consultarGastosPorMesYAnho($mes, $anho) {
                 "IdEstado" => $row['IdEstado'],
                 "IdCategoria" => $row['IdCategoria'],
                 "FechaPago" => $row['FechaPago'],
-                "idPresupuesto" => $row['idPresupuesto'],
-                "Mes" => $row['Mes'],
-                "Anho" => $row['Anho']
+                "idPresupuesto" => $row['idPresupuesto']
             ];
         }
     }
@@ -264,7 +262,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         consultarGastosID($id);
         // Obtener el ID del parámetro GET
     }else if (isset($_GET['mes']) && !empty($_GET['mes'])  && isset($_GET['anho']) && !empty($_GET['anho'])
-        && $_GET['detalle'] === 'Totales') {
+        && $_GET['detalle'] === 'totales') {
         $mes = $_GET['mes'];
         $anho = $_GET['anho'];
         consultarTotalesGastos($mes,$anho);
