@@ -175,56 +175,108 @@ function consultarTotalesGastos($mes, $anho) {
 function insertarGastos($data) {
     global $mysql;
 
-    // Extraer mes y año de $data
-    $mes = $data['Mes']; // Debe contener el mes
-    $anio = $data['Anho']; // Debe contener el año
+    // Verificar si se trata de una matriz de objetos JSON
+    if (is_array($data)) {
+        foreach ($data as $registro) {
+            // Extraer mes y año del registro
+            $mes = $registro['Mes'];
+            $anio = $registro['Anho'];
 
-    // Consultar el idPresupuesto correspondiente
-    $consultaPresupuesto = "SELECT idPresupuesto 
-                            FROM presupuestos 
-                            WHERE Mes = '$mes' AND Anho = '$anio'
-                            ORDER BY idPresupuesto ASC 
-                            LIMIT 1";
+            // Consultar el idPresupuesto correspondiente
+            $consultaPresupuesto = "SELECT idPresupuesto 
+                                    FROM presupuestos 
+                                    WHERE Mes = ? AND Anho = ?
+                                    ORDER BY idPresupuesto ASC 
+                                    LIMIT 1";
 
-    $resultadoPresupuesto = $mysql->query($consultaPresupuesto);
-    if ($resultadoPresupuesto && $resultadoPresupuesto->num_rows > 0) {
-        // Obtener el primer idPresupuesto
-        $fila = $resultadoPresupuesto->fetch_assoc();
+            // Preparar la consulta para evitar inyecciones SQL
+            $stmt = $mysql->prepare($consultaPresupuesto);
+            $stmt->bind_param("ii", $mes, $anio); // Vincular los parámetros de manera segura
+            $stmt->execute();
+            $resultadoPresupuesto = $stmt->get_result();
+            if ($resultadoPresupuesto && $resultadoPresupuesto->num_rows > 0) {
+                // Obtener el primer idPresupuesto
+                $fila = $resultadoPresupuesto->fetch_assoc();
+                $idPresupuesto = $fila['idPresupuesto'];
+            } else {
+                echo "Error: No se encontró un presupuesto para el mes $mes y año $anio.";
+                return; // Salir de la función si no se encuentra el presupuesto
+            }
 
-        $idPresupuesto = $fila['idPresupuesto'];
+            // Preparar la consulta de inserción con sentencias preparadas
+            $query = "INSERT INTO gastos (NombreGasto, CostoPrevisto, CostoReal, FechaLimite, idPresupuesto, Observaciones, IdEstado, IdCategoria, FechaPago) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+            // Preparar la consulta
+            $stmt = $mysql->prepare($query);
+
+            // Vincular los parámetros de manera segura
+            $stmt->bind_param(
+                "ssddsiss", 
+                $registro['NombreGasto'], 
+                $registro['CostoPrevisto'], 
+                $registro['CostoReal'], 
+                $registro['FechaLimite'], 
+                $idPresupuesto, 
+                $registro['Observaciones'], 
+                $registro['IdEstado'], 
+                $registro['IdCategoria'], 
+                $registro['FechaPago']
+            );
+
+            // Ejecutar la consulta
+            if ($stmt->execute()) {
+                echo "Gasto insertado correctamente.<br>";
+            } else {
+                echo "Error al insertar el gasto: " . $mysql->error . "<br>";
+            }
+        }
     } else {
-        echo "Error: No se encontró un presupuesto para el mes $mes y año $anio.";
-        return; // Salir de la función si no se encuentra el presupuesto
-    }
-
-    // Construir el query de inserción
-    $query = "INSERT INTO gastos (NombreGasto, CostoPrevisto, CostoReal, FechaLimite, idPresupuesto, Observaciones, IdEstado, IdCategoria, FechaPago) 
-              VALUES ('".$data['NombreGasto']."', '".$data['CostoPrevisto']."', '".$data['CostoReal']."','".$data['FechaLimite']."', 
-                  '$idPresupuesto', '".$data['Observaciones']."', '".$data['IdEstado']."', '".$data['IdCategoria']."', '".$data['FechaPago']."')";
-
-    // Ejecutar el query de inserción
-    if ($mysql->query($query) === TRUE) {
-        echo "Gasto insertado correctamente.";
-    } else {
-        echo "Error al insertar el gasto: " . $mysql->error;
-        echo "Query: " . $query;
+        echo "El formato de datos no es válido.";
     }
 }
+
 
 
 // Editar Presupuesto Personal
 function editarGastos($data) {
     global $mysql;
-    $query = "UPDATE gastos 
-                SET NombreGasto='".$data['NombreGasto']."', CostoPrevisto='".$data['CostoPrevisto']."', 
-                CostoReal='".$data['CostoReal']."', FechaLimite='".$data['FechaLimite']."', Observaciones='".$data['Observaciones']."', 
-                IdEstado='".$data['IdEstado']."', IdCategoria='".$data['IdCategoria']."', FechaPago='".$data['FechaPago']."' 
-                WHERE idGastos='".$data['id']."'";
-    if ($mysql->query($query) === TRUE) {
-        echo "Gasto actualizado correctamente.";
+
+    // Verificar si se trata de una matriz de objetos JSON
+    if (is_array($data)) {
+        foreach ($data as $registro) {
+            // Preparar la consulta de actualización con sentencias preparadas
+            $query = "UPDATE gastos 
+                      SET NombreGasto = ?, CostoPrevisto = ?, CostoReal = ?, FechaLimite = ?, Observaciones = ?, 
+                          IdEstado = ?, IdCategoria = ?, FechaPago = ? 
+                      WHERE idGastos = ?";
+
+            // Preparar la consulta
+            $stmt = $mysql->prepare($query);
+
+            // Vincular los parámetros de manera segura
+            $stmt->bind_param(
+                "ssddsiiss", 
+                $registro['NombreGasto'], 
+                $registro['CostoPrevisto'], 
+                $registro['CostoReal'], 
+                $registro['FechaLimite'], 
+                $registro['Observaciones'], 
+                $registro['IdEstado'], 
+                $registro['IdCategoria'], 
+                $registro['FechaPago'], 
+                $registro['id']
+            );
+
+            // Ejecutar la consulta
+            if ($stmt->execute()) {
+                echo "Gasto actualizado correctamente para ID " . $registro['id'] . ".<br>";
+            } else {
+                echo "Error al actualizar el Gasto para ID " . $registro['id'] . ": " . $mysql->error . "<br>";
+            }
+        }
     } else {
-        echo "Error al actualizar el Gasto: " . $mysql->error;
-        echo "query" . $query;
+        echo "El formato de datos no es válido.";
     }
 }
 
@@ -244,15 +296,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $accion = $_POST['accion'];
     $tabla = "gastos";
 
+    // Obtener los datos JSON enviados (puedes usar json_decode en lugar de $_POST si es un JSON completo)
+    $data = json_decode(file_get_contents('php://input'), true); 
+
     if ($accion == 'insertar') {
-        $data = $_POST;
-        unset($data['accion']);
-        unset($data['tabla']);
         insertarGastos($data);
     } elseif ($accion == 'editar') {
-        $data = $_POST;
-        unset($data['accion']);
-        unset($data['tabla']);
         editarGastos($data);
     } elseif ($accion == 'eliminar') {
         $id = $_POST['id'];
