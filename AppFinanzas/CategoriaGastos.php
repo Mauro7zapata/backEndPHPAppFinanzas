@@ -67,25 +67,40 @@ function consultarCategoriasGastosId($id) {
 // Insertar Categorías de Gastos
 function insertarCategoriaGastos($data) {
     global $mysql;
-    $query = "INSERT INTO categoriagastos (NombreCategoria, ColorCategoria, ImagenCategoria) VALUES ('".$data['NombreCategoria']."', '".$data['ColorCategoria']."', '".$data['ImagenCategoria']."')";
-    if ($mysql->query($query) === TRUE) {
-        echo "Categoría de gasto insertada correctamente.";
+    $query = "INSERT INTO categoriagastos (NombreCategoria, ColorCategoria, ImagenCategoria) VALUES (?, ?, ?)";
+    $stmt = $mysql->prepare($query);
+    if ($stmt) {
+        $stmt->bind_param("sss", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria']);
+        if ($stmt->execute()) {
+            echo "Categoría de gasto insertada correctamente.";
+        } else {
+            echo "Error al insertar la categoría de gasto: " . $stmt->error;
+        }
+        $stmt->close();
     } else {
-        echo "Error al insertar la categoría de gasto: " . $mysql->error;
+        echo "Error al preparar la consulta: " . $mysql->error;
     }
 }
 
 // Editar Categorías de Gastos
 function editarCategoriaGastos($data) {
     global $mysql;
-    $query = "UPDATE categoriagastos SET NombreCategoria='".$data['NombreCategoria']."', ColorCategoria='".$data['ColorCategoria']."', ImagenCategoria='".$data['ImagenCategoria']."' WHERE idCategoriaGastos='".$data['id']."'";
-    if ($mysql->query($query) === TRUE) {
-        echo "Categoría de gasto actualizada correctamente.";
-        echo "query " . $query
+    $query = "UPDATE categoriagastos SET NombreCategoria = ?, ColorCategoria = ?, ImagenCategoria = ? WHERE idCategoriaGastos = ?";
+    $stmt = $mysql->prepare($query);
+    if ($stmt) {
+        $stmt->bind_param("sssi", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $data['id']);
+        if ($stmt->execute()) {
+            echo "query " . $query;
+            echo "Categoría de gasto actualizada correctamente.";
+        } else {
+            echo "Error al actualizar la categoría de gasto: " . $stmt->error;
+        }
+        $stmt->close();
     } else {
-        echo "Error al actualizar la categoría de gasto: " . $mysql->error;
+        echo "Error al preparar la consulta: " . $mysql->error;
     }
 }
+
 
 // Eliminar Categorías de Gastos
 function eliminarCategoriaGastos($id) {
