@@ -90,7 +90,7 @@ function editarCategoriaGastos($data) {
     if ($stmt) {
         $stmt->bind_param("sssi", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $data['id']);
         if ($stmt->execute()) {
-            echo "query " . $stmt;
+            echo "query " . $data['NombreCategoria'];
             echo "Categoría de gasto actualizada correctamente.";
         } else {
             echo "Error al actualizar la categoría de gasto: " . $stmt->error;
