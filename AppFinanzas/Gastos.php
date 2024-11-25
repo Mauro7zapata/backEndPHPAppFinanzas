@@ -35,6 +35,61 @@ function consultarGastos() {
     }
 }
 
+function consultarGastosPorMesYAnho($mes, $anho) {
+    global $mysql;
+
+    // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
+    $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
+                    g.FechaPago,g.idPresupuesto 
+            FROM gastos g INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos
+            JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
+            WHERE p.Mes = ? AND p.Anho = ?
+            order by c.NombreCategoria";
+
+    // Preparar la consulta para evitar inyecciones SQL
+    $stmt = $mysql->prepare($query);
+
+    // Verificar si la consulta se preparó correctamente
+    if (!$stmt) {
+        echo "Error al preparar la consulta: " . $mysql->error;
+        return;
+    }
+
+    // Vincular los parámetros
+    $stmt->bind_param("ii", $mes, $anho);
+
+    // Ejecutar la consulta
+    $stmt->execute();
+
+    // Obtener los resultados
+    $result = $stmt->get_result();
+    $response = [];
+
+    // Procesar los resultados
+    if ($result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $response[] = [
+                "idGastos" => $row['idGastos'],
+                "NombreGasto" => $row['NombreGasto'],
+                "CostoPrevisto" => $row['CostoPrevisto'],
+                "CostoReal" => $row['CostoReal'],
+                "FechaLimite" => $row['FechaLimite'],
+                "Observaciones" => $row['Observaciones'],
+                "IdEstado" => $row['IdEstado'],
+                "IdCategoria" => $row['IdCategoria'],
+                "FechaPago" => $row['FechaPago'],
+                "idPresupuesto" => $row['idPresupuesto'],
+                "Mes" => $row['Mes'],
+                "Anho" => $row['Anho']
+            ];
+        }
+    }
+
+    // Retornar los resultados como JSON
+    header('Content-Type: application/json');
+    echo json_encode($response);
+}
+
 function consultarGastosID($id) {
     global $mysql;
     $query = "SELECT idGastos, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, Observaciones, IdEstado, IdCategoria, FechaPago, idPresupuesto 
@@ -208,10 +263,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $id = $_GET['id'];
         consultarGastosID($id);
         // Obtener el ID del parámetro GET
-    }else if (isset($_GET['mes']) && !empty($_GET['mes'])  && isset($_GET['anho']) && !empty($_GET['anho'])) {
+    }else if (isset($_GET['mes']) && !empty($_GET['mes'])  && isset($_GET['anho']) && !empty($_GET['anho'])
+        && $_GET['detalle'] === 'Totales') {
         $mes = $_GET['mes'];
         $anho = $_GET['anho'];
         consultarTotalesGastos($mes,$anho);
+    } else if (isset($_GET['mes']) && !empty($_GET['mes'])  && isset($_GET['anho']) && !empty($_GET['anho'])
+        && $_GET['detalle'] === 'completo') {
+        $mes = $_GET['mes'];
+        $anho = $_GET['anho'];
+        consultarGastosPorMesYAnho($mes, $anho);
     } else {
         consultarGastos(); // Si no se pasa un ID, consultar todos los registros
     }
