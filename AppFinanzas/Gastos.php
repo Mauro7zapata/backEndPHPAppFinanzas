@@ -1,7 +1,7 @@
 <?php
 require_once("db.php");
 
-// Consultar Presupuesto Personal
+// Consultar Gastos
 function consultarGastos() {
     global $mysql;
     $query = "SELECT idGastos, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, Observaciones, IdEstado, IdCategoria, FechaPago,idPresupuesto 
@@ -193,7 +193,7 @@ function insertarGastos($data) {
         return;
     }
 
-    // Consulta de inserción
+    // sentencia de inserción
     $query = "INSERT INTO gastos (NombreGasto, CostoPrevisto, CostoReal, FechaLimite, idPresupuesto, Observaciones, IdEstado, IdCategoria, FechaPago)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
@@ -219,11 +219,11 @@ function insertarGastos($data) {
 }
 
 
-// Editar Presupuesto Personal
+// Editar Gasto
 function editarGastos($data) {
     global $mysql;
 
-    // Consulta de actualización
+    // sentencia de actualización
     $query = "UPDATE gastos 
               SET NombreGasto = ?, CostoPrevisto = ?, CostoReal = ?, FechaLimite = ?, Observaciones = ?, 
                   IdEstado = ?, IdCategoria = ?, FechaPago = ? 
@@ -250,56 +250,62 @@ function editarGastos($data) {
     }
 }
 
-// Eliminar Presupuesto Personal
+// Eliminar Gasto
 function eliminarGastos($id) {
     global $mysql;
-    $query = "DELETE FROM gastos WHERE idGastos='$id'";
-    if ($mysql->query($query) === TRUE) {
+    $query = "DELETE FROM gastos WHERE idGastos=?";
+    $stmt = $mysql->prepare($query);
+    $stmt->bind_param(
+        "i", 
+        $id
+    );
+
+    if ($stmt->execute()) {
         echo "Gasto eliminado correctamente.";
     } else {
         echo "Error al eliminar el Gasto: " . $mysql->error;
     }
 }
 
-// Procesar acciones basadas en el formulario
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $accion = $_POST['accion'];
-    $tabla = "gastos";
+    // Verificar si la solicitud es JSON
+    if (isset($_SERVER['CONTENT_TYPE']) && strpos($_SERVER['CONTENT_TYPE'], 'application/json') !== false) {
+        // Solicitud JSON
+        $data = json_decode(file_get_contents("php://input"), true);
 
-    $data = $_POST; 
+        // Verificar si la decodificación fue exitosa
+        if (is_array($data)) {
+            foreach ($data as $item) {
+                $accion = $item['accion']; // Acción (insertar, editar, etc.)
 
-    if ($accion == 'insertar') {
-        insertarGastos($data);
-    } elseif ($accion == 'editar') {
-        editarGastos($data);
-    } elseif ($accion == 'eliminar') {
-        $id = $_POST['id'];
-        eliminarGastos($id);
-    }
-}
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    // Recibir la solicitud JSON y decodificarla en un array PHP
-    $data = json_decode(file_get_contents("php://input"), true);
-
-    // Verificar si se ha decodificado correctamente
-    if (is_array($data)) {
-        // Iterar sobre cada elemento de la data
-        foreach ($data as $item) {
-            $accion = $item['accion']; // Acción (insertar, editar, etc.)
-            
-            if ($accion == 'insertar') {
-                insertarGastos($item);
-            } elseif ($accion == 'editar') {
-                editarGastos($item);
-            } elseif ($accion == 'eliminar') {
-                $id = $item['id'];
-                eliminarGastos($id);
-            } else {
-                echo "Acción no válida: " . $accion;
+                if ($accion == 'insertar') {
+                    insertarGastos($item);
+                } elseif ($accion == 'editar') {
+                    editarGastos($item);
+                } elseif ($accion == 'eliminar') {
+                    $id = $item['id'];
+                    eliminarGastos($id);
+                } else {
+                    echo "Acción no válida: " . $accion;
+                }
             }
+        } else {
+            echo "La data no está en el formato correcto.";
         }
     } else {
-        echo "La data no está en el formato correcto.";
+        // Solicitud del formulario
+        $accion = $_POST['accion'];
+        $tabla = "gastos";
+        $data = $_POST; 
+
+        if ($accion == 'insertar') {
+            insertarGastos($data);
+        } elseif ($accion == 'editar') {
+            editarGastos($data);
+        } elseif ($accion == 'eliminar') {
+            $id = $_POST['id'];
+            eliminarGastos($id);
+        }
     }
 }else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     // Obtener el ID del parámetro GET

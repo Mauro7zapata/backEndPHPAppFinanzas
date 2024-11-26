@@ -141,7 +141,7 @@ function consultarCostosPorEstado($idPresupuesto) {
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $accion = $_POST['accion'];
-    $tabla = "presupuestos"; // Usamos la tabla presupuestos como ejemplo
+    $tabla = "presupuestos";
 
     // Procesar la acción según el valor de 'accion'
     if ($accion == 'insertar') {

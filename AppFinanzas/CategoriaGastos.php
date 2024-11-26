@@ -105,8 +105,14 @@ function editarCategoriaGastos($data) {
 // Eliminar Categorías de Gastos
 function eliminarCategoriaGastos($id) {
     global $mysql;
-    $query = "DELETE FROM categoriagastos WHERE idCategoriaGastos='$id'";
-    if ($mysql->query($query) === TRUE) {
+    $query = "DELETE FROM categoriagastos WHERE idCategoriaGastos=?";
+    $stmt = $mysql->prepare($query);
+    $stmt->bind_param(
+        "i", 
+        $id
+    );
+
+    if ($stmt->execute()) {
         echo "Categoría de gasto eliminada correctamente.";
     } else {
         echo "Error al eliminar la categoría de gasto: " . $mysql->error;

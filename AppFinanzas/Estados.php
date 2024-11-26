@@ -69,8 +69,16 @@ function consultarEstadosId($id) {
 // Insertar Estado
 function insertarEstado($data) {
     global $mysql;
-    $query = "INSERT INTO estados (TipoEstado, NombreEstado, ColorEstado) VALUES ('".$data['TipoEstado']."', '".$data['NombreEstado']."', '".$data['ColorEstado']."')";
-    if ($mysql->query($query) === TRUE) {
+    $query = "INSERT INTO estados (TipoEstado, NombreEstado, ColorEstado) VALUES (?, ?, ?)";
+    $stmt = $mysql->prepare($query);
+    $stmt->bind_param(
+        "sss", 
+        $data['TipoEstado'], 
+        $data['NombreEstado'], 
+        $data['ColorEstado']
+    );
+
+    if ($stmt->execute()) {
         echo "Estado insertado correctamente.";
     } else {
         echo "Error al insertar el estado: " . $mysql->error;
@@ -80,8 +88,17 @@ function insertarEstado($data) {
 // Editar Estado
 function editarEstado($data) {
     global $mysql;
-    $query = "UPDATE estados SET TipoEstado='".$data['TipoEstado']."', NombreEstado='".$data['NombreEstado']."', ColorEstado='".$data['ColorEstado']."' WHERE idEstado='".$data['id']."'";
-    if ($mysql->query($query) === TRUE) {
+    $query = "UPDATE estados SET TipoEstado=?, NombreEstado=?, ColorEstado=? WHERE idEstado=?";
+    $stmt = $mysql->prepare($query);
+    $stmt->bind_param(
+        "sssi", 
+        $data['TipoEstado'], 
+        $data['NombreEstado'], 
+        $data['ColorEstado'],
+        $data['id']
+    );
+
+    if ($stmt->execute()) {
         echo "Estado actualizado correctamente.";
     } else {
         echo "Error al actualizar el estado: " . $mysql->error;
@@ -91,32 +108,68 @@ function editarEstado($data) {
 // Eliminar Estado
 function eliminarEstado($id) {
     global $mysql;
-    $query = "DELETE FROM estados WHERE idEstado='$id'";
-    if ($mysql->query($query) === TRUE) {
+    $query = "DELETE FROM estados WHERE idEstado=?";
+    $stmt = $mysql->prepare($query);
+    $stmt->bind_param(
+        "i", 
+        $id
+    );
+
+    if ($stmt->execute()) {
         echo "Estado eliminado correctamente.";
     } else {
         echo "Error al eliminar el estado: " . $mysql->error;
     }
 }
 
-// Procesar acciones basadas en el formulario
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $accion = $_POST['accion'];
-    $tabla = "estados";
+    // Verificar si la solicitud es JSON
+    if (isset($_SERVER['CONTENT_TYPE']) && strpos($_SERVER['CONTENT_TYPE'], 'application/json') !== false) {
+        // Solicitud JSON
+        $data = json_decode(file_get_contents("php://input"), true);
 
-    if ($accion == 'insertar') {
-        $data = $_POST;
-        unset($data['accion']);
-        unset($data['tabla']);
-        insertarEstado($data);
-    } elseif ($accion == 'editar') {
-        $data = $_POST;
-        unset($data['accion']);
-        unset($data['tabla']);
-        editarEstado($data);
-    } elseif ($accion == 'eliminar') {
-        $id = $_POST['id'];
-        eliminarEstado($id);
+        // Verificar si la data es un array
+        if (is_array($data)) {
+            foreach ($data as $item) {
+                $accion = $item['accion']; // Acción (insertar, editar, eliminar)
+                $tabla = "estados"; // Tabla para mantener consistencia
+
+                // Procesar cada acción basada en el JSON recibido
+                if ($accion == 'insertar') {
+                    unset($item['accion']);  // Eliminar la acción para solo enviar los datos
+                    unset($item['tabla']);   // Eliminar la tabla para solo enviar los datos
+                    insertarEstado($item);   // Llamar a la función para insertar
+                } elseif ($accion == 'editar') {
+                    unset($item['accion']);  // Eliminar la acción
+                    unset($item['tabla']);   // Eliminar la tabla
+                    editarEstado($item);     // Llamar a la función para editar
+                } elseif ($accion == 'eliminar') {
+                    $id = $item['id'];  // Obtener el id del JSON
+                    eliminarEstado($id); // Llamar a la función para eliminar
+                }
+            }
+        } else {
+            echo "La data no está en el formato correcto.";
+        }
+    } else {
+        // Solicitud de formulario
+        $accion = $_POST['accion'];
+        $tabla = "estados";
+
+        if ($accion == 'insertar') {
+            $data = $_POST;
+            unset($data['accion']);
+            unset($data['tabla']);
+            insertarEstado($data);
+        } elseif ($accion == 'editar') {
+            $data = $_POST;
+            unset($data['accion']);
+            unset($data['tabla']);
+            editarEstado($data);
+        } elseif ($accion == 'eliminar') {
+            $id = $_POST['id'];
+            eliminarEstado($id);
+        }
     }
 }  else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     // Obtener el ID del parámetro GET
