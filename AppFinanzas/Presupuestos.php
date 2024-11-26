@@ -10,8 +10,6 @@ function enviarRespuesta($status, $message) {
     ]);
 }
 
-
-// Insertar un nuevo presupuesto
 function insertarPresupuesto($data) {
     global $mysql;
 
@@ -20,16 +18,31 @@ function insertarPresupuesto($data) {
     $Anho = $data['Anho'];
     $Mes = $data['Mes'];
 
-    $query = "INSERT INTO presupuestos (ValorPresupuesto, ExtrasMes, Anho, Mes) VALUES (?, ?, ?, ?)";
-    $stmt = $mysql->prepare($query);
-    $stmt->bind_param("diis", $ValorPresupuesto, $ExtrasMes, $Anho, $Mes);
+    // Verificar si ya existe un presupuesto con el mismo año y mes
+    $queryVerificar = "SELECT idPresupuesto FROM presupuestos WHERE Anho = ? AND Mes = ?";
+    $stmtVerificar = $mysql->prepare($queryVerificar);
+    $stmtVerificar->bind_param("is", $Anho, $Mes);
+    $stmtVerificar->execute();
+    $resultadoVerificar = $stmtVerificar->get_result();
 
-    if ($stmt->execute()) {
+    if ($resultadoVerificar->num_rows > 0) {
+        // Si ya existe, enviar mensaje de alerta
+        enviarRespuesta("error", "Ya existe un presupuesto para el mes y año proporcionados");
+        return;
+    }
+
+    // Si no existe, proceder con la inserción
+    $queryInsertar = "INSERT INTO presupuestos (ValorPresupuesto, ExtrasMes, Anho, Mes) VALUES (?, ?, ?, ?)";
+    $stmtInsertar = $mysql->prepare($queryInsertar);
+    $stmtInsertar->bind_param("diis", $ValorPresupuesto, $ExtrasMes, $Anho, $Mes);
+
+    if ($stmtInsertar->execute()) {
         enviarRespuesta("success", "Presupuesto insertado correctamente");
     } else {
         enviarRespuesta("error", "Error al insertar el presupuesto");
     }
 }
+
 
 // Editar un presupuesto
 function editarPresupuesto($data) {
