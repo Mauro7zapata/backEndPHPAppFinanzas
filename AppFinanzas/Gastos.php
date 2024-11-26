@@ -5,7 +5,7 @@ require_once("db.php");
 function consultarGastos() {
     global $mysql;
     $query = "SELECT idGastos, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, Observaciones, IdEstado, IdCategoria, FechaPago,idPresupuesto 
-            FROM gastos INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos order by c.NombreCategoria";
+            FROM gastos INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos order by c.NombreCategoria,NombreGasto";
     $result = $mysql->query($query);
 
     $response = [];
@@ -45,7 +45,7 @@ function consultarGastosPorMesYAnho($mes, $anho) {
             INNER JOIN estados e ON g.IdEstado = e.idEstado
             INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
             WHERE p.Mes = ? AND p.Anho = ?
-            order by c.NombreCategoria";
+            order by c.NombreCategoria,g.NombreGasto";
 
     // Preparar la consulta para evitar inyecciones SQL
     $stmt = $mysql->prepare($query);
