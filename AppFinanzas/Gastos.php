@@ -199,7 +199,7 @@ function insertarGastos($data) {
 
     $stmt = $mysql->prepare($query);
     $stmt->bind_param(
-        "ssddsiss", 
+        "ssddsiiss", 
         $data['NombreGasto'], 
         $data['CostoPrevisto'], 
         $data['CostoReal'], 
