@@ -266,7 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $accion = $_POST['accion'];
     $tabla = "gastos";
 
-    $data = $_POST
+    $data = $_POST; 
 
     if ($accion == 'insertar') {
         insertarGastos($data);
@@ -279,7 +279,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 }
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // Recibir la solicitud JSON y decodificarla en un array PHP
-    $data = ;
+    $data = json_decode(file_get_contents("php://input"), true);
 
     // Verificar si se ha decodificado correctamente
     if (is_array($data)) {
