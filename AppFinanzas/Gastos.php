@@ -266,8 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $accion = $_POST['accion'];
     $tabla = "gastos";
 
-    // Obtener los datos JSON enviados (puedes usar json_decode en lugar de $_POST si es un JSON completo)
-    $data = json_decode(file_get_contents('php://input'), true); 
+    $data = $_POST
 
     if ($accion == 'insertar') {
         insertarGastos($data);
@@ -280,7 +279,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 }
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // Recibir la solicitud JSON y decodificarla en un array PHP
-    $data = json_decode(file_get_contents("php://input"), true);
+    $data = ;
 
     // Verificar si se ha decodificado correctamente
     if (is_array($data)) {
@@ -293,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             } elseif ($accion == 'editar') {
                 editarGastos($item);
             } elseif ($accion == 'eliminar') {
-                $id = $_POST['id'];
+                $id = $item['id'];
                 eliminarGastos($id);
             } else {
                 echo "Acción no válida: " . $accion;
