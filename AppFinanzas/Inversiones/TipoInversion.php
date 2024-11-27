@@ -9,7 +9,7 @@ function procesarTipoInversion($data) {
     switch ($accion) {
         case 'crear':
             $stmt = $mysqli->prepare("INSERT INTO TablaTipoInversion (Nombre,Descripcion) VALUES (?,?)");
-            $stmt->bind_param('s', $data['Nombre'],$data['Descripcion']);
+            $stmt->bind_param('ss', $data['Nombre'],$data['Descripcion']);
             $stmt->execute();
             echo json_encode(['id' => $mysqli->insert_id]);
             break;
