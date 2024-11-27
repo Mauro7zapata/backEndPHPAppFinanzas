@@ -85,20 +85,22 @@ function consultarTipoInversionId($id) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    header('Content-Type: application/json');
     $contentType = isset($_SERVER["CONTENT_TYPE"]) ? $_SERVER["CONTENT_TYPE"] : '';
 
     if (strpos($contentType, "application/json") !== false) {
         $input = json_decode(file_get_contents('php://input'), true);
-
-        if (json_last_error() === JSON_ERROR_NONE) {
-            procesarTipoInversion($input);
+        if (is_array($input)) {
+            foreach ($input as $data) {
+                procesarTipoInversion($data);
+            }
         } else {
-            echo json_encode(['error' => 'JSON inválido']);
+            procesarTipoInversion($input);
         }
     } else {
         procesarTipoInversion($_POST);
     }
-} elseif ($_SERVER['REQUEST_METHOD'] == 'GET') {
+}elseif ($_SERVER['REQUEST_METHOD'] == 'GET') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
         consultarTipoInversionId($_GET['id']);
     } else {
