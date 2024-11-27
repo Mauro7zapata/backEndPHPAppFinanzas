@@ -1,5 +1,5 @@
 <?php
-require_once  __DIR__ . '/db.php';
+require_once '../db.php';
 
 function procesarTipoInversion($data) {
     global $mysqli;
@@ -15,7 +15,7 @@ function procesarTipoInversion($data) {
             break;
 
         case 'actualizar':
-            $stmt = $mysqli->prepare("UPDATE TablaTipoInversion SET Nombre=?, Descripcion=?WHERE idTipo=?");
+            $stmt = $mysqli->prepare("UPDATE TablaTipoInversion SET Nombre=?, Descripcion=? WHERE idTipo=?");
             $stmt->bind_param('ssi', $data['Nombre'],$data['Descripcion'], $data['idTipo']);
             $stmt->execute();
             echo json_encode(['updated' => $stmt->affected_rows > 0]);
