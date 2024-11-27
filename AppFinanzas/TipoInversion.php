@@ -35,6 +35,68 @@ function procesarTipoInversion($data) {
     }
 }
 
+// Consultar Categorías de Gastos
+function consultarTipoInversion() {
+    global $mysql;
+    $query = "SELECT * FROM TablaTipoInversion";
+    $result = $mysql->query($query);
+    
+    $response = [];
+    
+    if ($result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $response[] = [
+                "idTipo" => $row['idTipo'],
+                "Nombre" => $row['Nombre'],
+                "Descripcion" => $row['Descripcion']
+            ];
+        }
+        // Retornar la respuesta como JSON
+        header('Content-Type: application/json');
+        echo json_encode($response);
+    } else {
+        // Retornar un JSON vacío si no hay registros
+        header('Content-Type: application/json');
+        echo json_encode([]);
+    }
+}
+
+// Consultar Categorías de Gastos
+function consultarTipoInversionId($id) {
+    global $mysql;
+    $query = "SELECT * FROM TablaTipoInversion 
+                WHERE idTipo = ?";
+    $stmt = $mysql->prepare($query);
+
+    if ($stmt) {
+        $stmt->bind_param("i", $id); // Asegúrate de pasar el ID como un entero
+
+        $stmt->execute();
+        $result = $stmt->get_result();
+    
+        $response = [];
+        
+        if ($result->num_rows > 0) {
+            while ($row = $result->fetch_assoc()) {
+                $response[] = [
+                    "idTipo" => $row['idTipo'],
+                    "Nombre" => $row['Nombre'],
+                    "Descripcion" => $row['Descripcion']
+                ];
+            }
+            // Retornar la respuesta como JSON
+            header('Content-Type: application/json');
+            echo json_encode($response);
+        } else {
+            // Retornar un JSON vacío si no hay registros
+            header('Content-Type: application/json');
+            echo json_encode([]);
+        }
+    } else {
+        echo "Error al preparar la consulta de Categoria: " . $mysql->error;
+    } 
+}
+
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $contentType = isset($_SERVER["CONTENT_TYPE"]) ? $_SERVER["CONTENT_TYPE"] : '';
 
@@ -52,14 +114,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 } else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
-        $stmt = $mysqli->prepare("SELECT * FROM TablaTipoInversion WHERE idTipo=?");
-        $stmt->bind_param('i', $_GET['id']);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        echo json_encode($result->fetch_assoc());
+        consultarTipoInversionId($_GET['id'])
     } else {
-        $result = $mysqli->query("SELECT * FROM TablaTipoInversion");
-        echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+        consultarTipoInversion()
     }
 }
 ?>
