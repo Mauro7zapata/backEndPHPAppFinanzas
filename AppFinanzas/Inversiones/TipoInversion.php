@@ -8,15 +8,15 @@ function procesarTipoInversion($data) {
 
     switch ($accion) {
         case 'crear':
-            $stmt = $mysqli->prepare("INSERT INTO TablaTipoInversion (Nombre) VALUES (?)");
-            $stmt->bind_param('s', $data['Nombre']);
+            $stmt = $mysqli->prepare("INSERT INTO TablaTipoInversion (Nombre,Descripcion) VALUES (?,?)");
+            $stmt->bind_param('s', $data['Nombre'],$data['Descripcion']);
             $stmt->execute();
             echo json_encode(['id' => $mysqli->insert_id]);
             break;
 
         case 'actualizar':
-            $stmt = $mysqli->prepare("UPDATE TablaTipoInversion SET Nombre=? WHERE idTipo=?");
-            $stmt->bind_param('si', $data['Nombre'], $data['idTipo']);
+            $stmt = $mysqli->prepare("UPDATE TablaTipoInversion SET Nombre=?, Descripcion=?WHERE idTipo=?");
+            $stmt->bind_param('ssi', $data['Nombre'],$data['Descripcion'], $data['idTipo']);
             $stmt->execute();
             echo json_encode(['updated' => $stmt->affected_rows > 0]);
             break;
