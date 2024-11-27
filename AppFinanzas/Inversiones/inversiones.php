@@ -8,54 +8,59 @@ function procesarAccion($data) {
 
     $accion = isset($data['accion']) ? $data['accion'] : '';
 
-    switch ($accion) {
-        case 'crear':
-            echo "va a crear";
-            $stmt = $mysql->prepare("INSERT INTO Inversiones (Nombre, IdTipo, CapitalInvertido, FechaInicio, FechaFin, Interes, NroCuotas, CuotaPactada, PeriodicidadPagoDividendos, idEstado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param('sidsdsdsii', 
-                $data['Nombre'], 
-                $data['IdTipo'], 
-                $data['CapitalInvertido'], 
-                $data['FechaInicio'], 
-                $data['FechaFin'], 
-                $data['Interes'], 
-                $data['NroCuotas'], 
-                $data['CuotaPactada'], 
-                $data['PeriodicidadPagoDividendos'], 
-                $data['idEstado']
-            );
-            $stmt->execute();
-            echo json_encode(['id' => $mysql->insert_id]);
-            break;
+    try {
 
-        case 'actualizar':
-            $stmt = $mysql->prepare("UPDATE Inversiones SET Nombre=?, IdTipo=?, CapitalInvertido=?, FechaInicio=?, FechaFin=?, Interes=?, NroCuotas=?, CuotaPactada=?, PeriodicidadPagoDividendos=?, idEstado=? WHERE idInversion=?");
-            $stmt->bind_param('sidsdsdsiii', 
-                $data['Nombre'], 
-                $data['IdTipo'], 
-                $data['CapitalInvertido'], 
-                $data['FechaInicio'], 
-                $data['FechaFin'], 
-                $data['Interes'], 
-                $data['NroCuotas'], 
-                $data['CuotaPactada'], 
-                $data['PeriodicidadPagoDividendos'], 
-                $data['idEstado'], 
-                $data['idInversion']
-            );
-            $stmt->execute();
-            echo json_encode(['updated' => $stmt->affected_rows > 0]);
-            break;
+        switch ($accion) {
+            case 'crear':
+                echo "va a crear";
+                $stmt = $mysql->prepare("INSERT INTO Inversiones (Nombre, IdTipo, CapitalInvertido, FechaInicio, FechaFin, Interes, NroCuotas, CuotaPactada, PeriodicidadPagoDividendos, idEstado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param('sidssdidii', 
+                    $data['Nombre'], 
+                    $data['IdTipo'], 
+                    $data['CapitalInvertido'], 
+                    $data['FechaInicio'], 
+                    $data['FechaFin'], 
+                    $data['Interes'], 
+                    $data['NroCuotas'], 
+                    $data['CuotaPactada'], 
+                    $data['PeriodicidadPagoDividendos'], 
+                    $data['idEstado']
+                );
+                $stmt->execute();
+                echo json_encode(['id' => $mysql->insert_id]);
+                break;
 
-        case 'eliminar':
-            $stmt = $mysql->prepare("DELETE FROM Inversiones WHERE idInversion=?");
-            $stmt->bind_param('i', $data['idInversion']);
-            $stmt->execute();
-            echo json_encode(['deleted' => $stmt->affected_rows > 0]);
-            break;
+            case 'actualizar':
+                $stmt = $mysql->prepare("UPDATE Inversiones SET Nombre=?, IdTipo=?, CapitalInvertido=?, FechaInicio=?, FechaFin=?, Interes=?, NroCuotas=?, CuotaPactada=?, PeriodicidadPagoDividendos=?, idEstado=? WHERE idInversion=?");
+                $stmt->bind_param('sidssdidiii', 
+                    $data['Nombre'], 
+                    $data['IdTipo'], 
+                    $data['CapitalInvertido'], 
+                    $data['FechaInicio'], 
+                    $data['FechaFin'], 
+                    $data['Interes'], 
+                    $data['NroCuotas'], 
+                    $data['CuotaPactada'], 
+                    $data['PeriodicidadPagoDividendos'], 
+                    $data['idEstado'], 
+                    $data['idInversion']
+                );
+                $stmt->execute();
+                echo json_encode(['updated' => $stmt->affected_rows > 0]);
+                break;
 
-        default:
-            echo json_encode(['error' => 'Acción no válida']);
+            case 'eliminar':
+                $stmt = $mysql->prepare("DELETE FROM Inversiones WHERE idInversion=?");
+                $stmt->bind_param('i', $data['idInversion']);
+                $stmt->execute();
+                echo json_encode(['deleted' => $stmt->affected_rows > 0]);
+                break;
+
+            default:
+                echo json_encode(['error' => 'Acción no válida']);
+        }
+    } catch (Exception $e) {
+        echo json_encode(['error' => $e->getMessage()]);
     }
 }
 
