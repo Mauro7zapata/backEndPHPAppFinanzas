@@ -3,11 +3,10 @@ require_once("db.php");
 
 echo "Conexion realizada";
 
-
 header('Content-Type: application/json');
 
 function procesarTipoInversion($data) {
-    global $mysql;;
+    global $mysql;
 
     $accion = isset($data['accion']) ? $data['accion'] : '';
 
@@ -46,7 +45,7 @@ function procesarTipoInversion($data) {
 }
 
 function consultarTipoInversion() {
-    global $mysql;;
+    global $mysql;
     $query = "SELECT * FROM TablaTipoInversion";
     $result = $mysql;->query($query);
 
@@ -66,7 +65,7 @@ function consultarTipoInversion() {
 }
 
 function consultarTipoInversionId($id) {
-    global $mysql;;
+    global $mysql;
     $query = "SELECT * FROM TablaTipoInversion WHERE idTipo = ?";
     $stmt = $mysql;->prepare($query);
 
