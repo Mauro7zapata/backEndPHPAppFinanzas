@@ -1,8 +1,6 @@
 <?php
 require_once("../db.php");
 
-echo "Conexion realizada";
-
 header('Content-Type: application/json');
 
 function procesarTipoInversion($data) {
