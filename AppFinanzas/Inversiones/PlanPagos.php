@@ -2,13 +2,13 @@
 require_once 'db.php';
 
 function procesarPlanPagos($data) {
-    global $mysqli;
+    global $mysql;;
 
     $accion = isset($data['accion']) ? $data['accion'] : '';
 
     switch ($accion) {
         case 'crear':
-            $stmt = $mysqli->prepare("INSERT INTO PlanPagos (idInversion, NroCuota, FechaPrevistaPago, FechaRealPago, InteresPagado, CapitalPagado, DividendoPagado) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt = $mysql;->prepare("INSERT INTO PlanPagos (idInversion, NroCuota, FechaPrevistaPago, FechaRealPago, InteresPagado, CapitalPagado, DividendoPagado) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $stmt->bind_param('iissddd', 
                 $data['idInversion'], 
                 $data['NroCuota'], 
@@ -19,11 +19,11 @@ function procesarPlanPagos($data) {
                 $data['DividendoPagado']
             );
             $stmt->execute();
-            echo json_encode(['id' => $mysqli->insert_id]);
+            echo json_encode(['id' => $mysql;->insert_id]);
             break;
 
         case 'actualizar':
-            $stmt = $mysqli->prepare("UPDATE PlanPagos SET idInversion=?, NroCuota=?, FechaPrevistaPago=?, FechaRealPago=?, InteresPagado=?, CapitalPagado=?, DividendoPagado=? WHERE idPlan=?");
+            $stmt = $mysql;->prepare("UPDATE PlanPagos SET idInversion=?, NroCuota=?, FechaPrevistaPago=?, FechaRealPago=?, InteresPagado=?, CapitalPagado=?, DividendoPagado=? WHERE idPlan=?");
             $stmt->bind_param('iissdddi', 
                 $data['idInversion'], 
                 $data['NroCuota'], 
@@ -39,7 +39,7 @@ function procesarPlanPagos($data) {
             break;
 
         case 'eliminar':
-            $stmt = $mysqli->prepare("DELETE FROM PlanPagos WHERE idPlan=?");
+            $stmt = $mysql;->prepare("DELETE FROM PlanPagos WHERE idPlan=?");
             $stmt->bind_param('i', $data['idPlan']);
             $stmt->execute();
             echo json_encode(['deleted' => $stmt->affected_rows > 0]);
@@ -67,14 +67,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 } else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
-        $stmt = $mysqli->prepare("SELECT * FROM PlanPagos WHERE idPlan=?");
+        $stmt = $mysql;->prepare("SELECT * FROM PlanPagos WHERE idPlan=?");
         $stmt->bind_param('i', $_GET['id']);
         $stmt->execute();
         $result = $stmt->get_result();
         echo json_encode($result->fetch_assoc());
     } else {
-        $result = $mysqli->query("SELECT * FROM PlanPagos");
-        echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+        $result = $mysql;->query("SELECT * FROM PlanPagos");
+        echo json_encode($result->fetch_all(mysql;_ASSOC));
     }
 }
 ?>

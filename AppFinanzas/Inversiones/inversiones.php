@@ -2,13 +2,13 @@
 require_once 'db.php';
 
 function procesarAccion($data) {
-    global $mysqli;
+    global $mysql;;
 
     $accion = isset($data['accion']) ? $data['accion'] : '';
 
     switch ($accion) {
         case 'crear':
-            $stmt = $mysqli->prepare("INSERT INTO Inversiones (Nombre, IdTipo, CapitalInvertido, FechaInicio, FechaFin, Interes, NroCuotas, CuotaPactada, PeriodicidadPagoDividendos, idEstado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt = $mysql;->prepare("INSERT INTO Inversiones (Nombre, IdTipo, CapitalInvertido, FechaInicio, FechaFin, Interes, NroCuotas, CuotaPactada, PeriodicidadPagoDividendos, idEstado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             $stmt->bind_param('sidsdsdsii', 
                 $data['Nombre'], 
                 $data['IdTipo'], 
@@ -22,11 +22,11 @@ function procesarAccion($data) {
                 $data['idEstado']
             );
             $stmt->execute();
-            echo json_encode(['id' => $mysqli->insert_id]);
+            echo json_encode(['id' => $mysql;->insert_id]);
             break;
 
         case 'actualizar':
-            $stmt = $mysqli->prepare("UPDATE Inversiones SET Nombre=?, IdTipo=?, CapitalInvertido=?, FechaInicio=?, FechaFin=?, Interes=?, NroCuotas=?, CuotaPactada=?, PeriodicidadPagoDividendos=?, idEstado=? WHERE idInversion=?");
+            $stmt = $mysql;->prepare("UPDATE Inversiones SET Nombre=?, IdTipo=?, CapitalInvertido=?, FechaInicio=?, FechaFin=?, Interes=?, NroCuotas=?, CuotaPactada=?, PeriodicidadPagoDividendos=?, idEstado=? WHERE idInversion=?");
             $stmt->bind_param('sidsdsdsiii', 
                 $data['Nombre'], 
                 $data['IdTipo'], 
@@ -45,7 +45,7 @@ function procesarAccion($data) {
             break;
 
         case 'eliminar':
-            $stmt = $mysqli->prepare("DELETE FROM Inversiones WHERE idInversion=?");
+            $stmt = $mysql;->prepare("DELETE FROM Inversiones WHERE idInversion=?");
             $stmt->bind_param('i', $data['idInversion']);
             $stmt->execute();
             echo json_encode(['deleted' => $stmt->affected_rows > 0]);
@@ -73,14 +73,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 } else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
-        $stmt = $mysqli->prepare("SELECT * FROM Inversiones WHERE idInversion=?");
+        $stmt = $mysql;->prepare("SELECT * FROM Inversiones WHERE idInversion=?");
         $stmt->bind_param('i', $_GET['id']);
         $stmt->execute();
         $result = $stmt->get_result();
         echo json_encode($result->fetch_assoc());
     } else {
-        $result = $mysqli->query("SELECT * FROM Inversiones");
-        echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+        $result = $mysql;->query("SELECT * FROM Inversiones");
+        echo json_encode($result->fetch_all(mysql;_ASSOC));
     }
 }
 ?>
