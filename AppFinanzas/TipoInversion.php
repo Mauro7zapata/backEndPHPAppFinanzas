@@ -1,7 +1,7 @@
 <?php
 require_once("db.php");
 
-echo "Conexion realizada"
+echo "Conexion realizada";
 
 
 header('Content-Type: application/json');
