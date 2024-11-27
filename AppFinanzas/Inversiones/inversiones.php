@@ -1,6 +1,8 @@
 <?php
 require_once("../db.php");
 
+echo "conecto";
+
 function procesarAccion($data) {
     global $mysql;
 
@@ -8,6 +10,7 @@ function procesarAccion($data) {
 
     switch ($accion) {
         case 'crear':
+            echo "va a crear";
             $stmt = $mysql->prepare("INSERT INTO Inversiones (Nombre, IdTipo, CapitalInvertido, FechaInicio, FechaFin, Interes, NroCuotas, CuotaPactada, PeriodicidadPagoDividendos, idEstado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             $stmt->bind_param('sidsdsdsii', 
                 $data['Nombre'], 
