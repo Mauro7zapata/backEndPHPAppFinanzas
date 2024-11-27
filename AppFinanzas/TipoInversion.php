@@ -13,24 +13,24 @@ function procesarTipoInversion($data) {
     try {
         switch ($accion) {
             case 'crear':
-                $stmt = $mysql;->prepare("INSERT INTO TablaTipoInversion (Nombre, Descripcion) VALUES (?, ?)");
-                if (!$stmt) throw new Exception($mysql;->error);
+                $stmt = $mysql->prepare("INSERT INTO TablaTipoInversion (Nombre, Descripcion) VALUES (?, ?)");
+                if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('ss', $data['Nombre'], $data['Descripcion']);
                 $stmt->execute();
-                echo json_encode(['id' => $mysql;->insert_id]);
+                echo json_encode(['id' => $mysql->insert_id]);
                 break;
 
             case 'actualizar':
-                $stmt = $mysql;->prepare("UPDATE TablaTipoInversion SET Nombre = ?, Descripcion = ? WHERE idTipo = ?");
-                if (!$stmt) throw new Exception($mysql;->error);
+                $stmt = $mysql->prepare("UPDATE TablaTipoInversion SET Nombre = ?, Descripcion = ? WHERE idTipo = ?");
+                if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('ssi', $data['Nombre'], $data['Descripcion'], $data['idTipo']);
                 $stmt->execute();
                 echo json_encode(['updated' => $stmt->affected_rows > 0]);
                 break;
 
             case 'eliminar':
-                $stmt = $mysql;->prepare("DELETE FROM TablaTipoInversion WHERE idTipo = ?");
-                if (!$stmt) throw new Exception($mysql;->error);
+                $stmt = $mysql->prepare("DELETE FROM TablaTipoInversion WHERE idTipo = ?");
+                if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('i', $data['idTipo']);
                 $stmt->execute();
                 echo json_encode(['deleted' => $stmt->affected_rows > 0]);
@@ -47,7 +47,7 @@ function procesarTipoInversion($data) {
 function consultarTipoInversion() {
     global $mysql;
     $query = "SELECT * FROM TablaTipoInversion";
-    $result = $mysql;->query($query);
+    $result = $mysql->query($query);
 
     if ($result) {
         $response = [];
@@ -60,14 +60,14 @@ function consultarTipoInversion() {
         }
         echo json_encode($response);
     } else {
-        echo json_encode(['error' => $mysql;->error]);
+        echo json_encode(['error' => $mysql->error]);
     }
 }
 
 function consultarTipoInversionId($id) {
     global $mysql;
     $query = "SELECT * FROM TablaTipoInversion WHERE idTipo = ?";
-    $stmt = $mysql;->prepare($query);
+    $stmt = $mysql->prepare($query);
 
     if ($stmt) {
         $stmt->bind_param("i", $id);
@@ -80,7 +80,7 @@ function consultarTipoInversionId($id) {
             echo json_encode([]);
         }
     } else {
-        echo json_encode(['error' => $mysql;->error]);
+        echo json_encode(['error' => $mysql->error]);
     }
 }
 
