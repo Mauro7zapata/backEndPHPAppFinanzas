@@ -77,13 +77,13 @@ function consultarInversiones() {
                "idInversion" => $row['idInversion'],
                 "Nombre" => $row['Nombre'],
                 "IdTipo" => $row['IdTipo'],
-                "FechaInicio" => $row['FechaInicio']
-                "FechaFin" => $row['FechaFin']
-                "Interes" => $row['Interes']
-                "NroCuotas" => $row['NroCuotas']
-                "CuotaPactada" => $row['CuotaPactada']
-                "PeriodicidadPagoDividendos" => $row['PeriodicidadPagoDividendos']
-                "CapitalInvertido" => $row['CapitalInvertido']
+                "FechaInicio" => $row['FechaInicio'],
+                "FechaFin" => $row['FechaFin'],
+                "Interes" => $row['Interes'],
+                "NroCuotas" => $row['NroCuotas'],
+                "CuotaPactada" => $row['CuotaPactada'],
+                "PeriodicidadPagoDividendos" => $row['PeriodicidadPagoDividendos'],
+                "CapitalInvertido" => $row['CapitalInvertido'],
                 "idEstado" => $row['idEstado']
             ];
         }
@@ -115,13 +115,13 @@ function consultarInversionId($id) {
                 "idInversion" => $row['idInversion'],
                     "Nombre" => $row['Nombre'],
                     "IdTipo" => $row['IdTipo'],
-                    "FechaInicio" => $row['FechaInicio']
-                    "FechaFin" => $row['FechaFin']
-                    "Interes" => $row['Interes']
-                    "NroCuotas" => $row['NroCuotas']
-                    "CuotaPactada" => $row['CuotaPactada']
-                    "PeriodicidadPagoDividendos" => $row['PeriodicidadPagoDividendos']
-                    "CapitalInvertido" => $row['CapitalInvertido']
+                    "FechaInicio" => $row['FechaInicio'],
+                    "FechaFin" => $row['FechaFin'],
+                    "Interes" => $row['Interes'],
+                    "NroCuotas" => $row['NroCuotas'],
+                    "CuotaPactada" => $row['CuotaPactada'],
+                    "PeriodicidadPagoDividendos" => $row['PeriodicidadPagoDividendos'],
+                    "CapitalInvertido" => $row['CapitalInvertido'],
                     "idEstado" => $row['idEstado']
                 ];
             }
@@ -156,9 +156,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 } else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
         $id = $_GET['id'];
-        consultarInversionId($id)
+        consultarInversionId($id);
     } else {
-        consultarInversiones()
+        consultarInversiones();
     }
 }
 ?>

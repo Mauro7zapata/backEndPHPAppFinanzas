@@ -69,11 +69,11 @@ function consultarPagosPorInversion($idInversion) {
                     "idPlan" => $row['idPlan'],
                     "idInversion" => $row['idInversion'],
                     "NroCuota" => $row['NroCuota'],
-                    "FechaPrevistaPago" => $row['FechaPrevistaPago']
-                    "FechaRealPago" => $row['FechaRealPago']
-                    "InteresPagado" => $row['InteresPagado']
-                    "CapitalPagado" => $row['CapitalPagado']
-                    "DividendoPagado" => $row['DividendoPagado']
+                    "FechaPrevistaPago" => $row['FechaPrevistaPago'],
+                    "FechaRealPago" => $row['FechaRealPago'],
+                    "InteresPagado" => $row['InteresPagado'],
+                    "CapitalPagado" => $row['CapitalPagado'],
+                    "DividendoPagado" => $row['DividendoPagado'],
                     "idEstado" => $row['idEstado']
                 ];
             }
@@ -105,11 +105,11 @@ function consultarPagoPorId($id) {
                 "idPlan" => $row['idPlan'],
                 "idInversion" => $row['idInversion'],
                 "NroCuota" => $row['NroCuota'],
-                "FechaPrevistaPago" => $row['FechaPrevistaPago']
-                "FechaRealPago" => $row['FechaRealPago']
-                "InteresPagado" => $row['InteresPagado']
-                "CapitalPagado" => $row['CapitalPagado']
-                "DividendoPagado" => $row['DividendoPagado']
+                "FechaPrevistaPago" => $row['FechaPrevistaPago'],
+                "FechaRealPago" => $row['FechaRealPago'],
+                "InteresPagado" => $row['InteresPagado'],
+                "CapitalPagado" => $row['CapitalPagado'],
+                "DividendoPagado" => $row['DividendoPagado'],
                 "idEstado" => $row['idEstado']
             ];
         }
@@ -141,10 +141,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 } else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
         $id = $_GET['id'];
-        consultarPagoPorId($id)
+        consultarPagoPorId($id);
     } else if (isset($_GET['idInversion']) && !empty($_GET['idInversion'])) {
         $id = $_GET['idInversion'];
-        consultarPagosPorInversion(id)
+        consultarPagosPorInversion(id);
     }  else {
         echo "No se envio ningun parametro o no es valido";
     }
