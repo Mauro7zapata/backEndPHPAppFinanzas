@@ -8,22 +8,7 @@ function procesarPlanPagos($data) {
 
     switch ($accion) {
         case 'crear':
-            $stmt = $mysql->prepare("INSERT INTO PlanPagos (idInversion, NroCuota, FechaPrevistaPago, FechaRealPago, InteresPagado, CapitalPagado, DividendoPagado) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param('iissddd', 
-                $data['idInversion'], 
-                $data['NroCuota'], 
-                $data['FechaPrevistaPago'], 
-                $data['FechaRealPago'], 
-                $data['InteresPagado'], 
-                $data['CapitalPagado'], 
-                $data['DividendoPagado']
-            );
-            $stmt->execute();
-            echo json_encode(['id' => $mysql->insert_id]);
-            break;
-
-        case 'actualizar':
-            $stmt = $mysql->prepare("UPDATE PlanPagos SET idInversion=?, NroCuota=?, FechaPrevistaPago=?, FechaRealPago=?, InteresPagado=?, CapitalPagado=?, DividendoPagado=? WHERE idPlan=?");
+            $stmt = $mysql->prepare("INSERT INTO PlanPagos (idInversion, NroCuota, FechaPrevistaPago, FechaRealPago, InteresPagado, CapitalPagado, DividendoPagado,idEstado) VALUES (?, ?, ?, ?, ?, ?, ?,?)");
             $stmt->bind_param('iissdddi', 
                 $data['idInversion'], 
                 $data['NroCuota'], 
@@ -31,7 +16,24 @@ function procesarPlanPagos($data) {
                 $data['FechaRealPago'], 
                 $data['InteresPagado'], 
                 $data['CapitalPagado'], 
-                $data['DividendoPagado'], 
+                $data['DividendoPagado'],
+                $data['idEstado']
+            );
+            $stmt->execute();
+            echo json_encode(['id' => $mysql->insert_id]);
+            break;
+
+        case 'actualizar':
+            $stmt = $mysql->prepare("UPDATE PlanPagos SET idInversion=?, NroCuota=?, FechaPrevistaPago=?, FechaRealPago=?, InteresPagado=?, CapitalPagado=?, DividendoPagado=?,idEstado=? WHERE idPlan=?");
+            $stmt->bind_param('iissdddii', 
+                $data['idInversion'], 
+                $data['NroCuota'], 
+                $data['FechaPrevistaPago'], 
+                $data['FechaRealPago'], 
+                $data['InteresPagado'], 
+                $data['CapitalPagado'], 
+                $data['DividendoPagado'],
+                $data['idEstado'], 
                 $data['idPlan']
             );
             $stmt->execute();
@@ -47,6 +49,77 @@ function procesarPlanPagos($data) {
 
         default:
             echo json_encode(['error' => 'Acción no válida']);
+    }
+}
+
+function consultarPagosPorInversion($idInversion) {
+    global $mysql;
+    $query = "SELECT * FROM Inversiones WHERE idInversion=?";
+    $stmt = $mysql->prepare($query);
+    if ($stmt) {
+        $stmt->bind_param("i", $idInversion); // Asegúrate de pasar el ID como un entero
+
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $response = [];
+
+        if ($result->num_rows > 0) {
+            while ($row = $result->fetch_assoc()) {
+                $response[] = [
+                    "idPlan" => $row['idPlan'],
+                    "idInversion" => $row['idInversion'],
+                    "NroCuota" => $row['NroCuota'],
+                    "FechaPrevistaPago" => $row['FechaPrevistaPago']
+                    "FechaRealPago" => $row['FechaRealPago']
+                    "InteresPagado" => $row['InteresPagado']
+                    "CapitalPagado" => $row['CapitalPagado']
+                    "DividendoPagado" => $row['DividendoPagado']
+                    "idEstado" => $row['idEstado']
+                ];
+            }
+            // Retornar los resultados como JSON
+            header('Content-Type: application/json');
+            echo json_encode($response);
+        } else {
+            // Retornar un JSON vacío si no hay registros
+            header('Content-Type: application/json');
+            echo json_encode([]);
+        }
+    } else {
+        echo "Error al preparar la consulta de Plan de Pagos: " . $mysql->error;
+    } 
+}
+
+function consultarPagoPorId($id) {
+    global $mysql;
+    $query = "SELECT * FROM PlanPagos WHERE idPlan=?";
+    $stmt->bind_param('i', $id['id']);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    $response = [];
+
+    if ($result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $response[] = [
+                "idPlan" => $row['idPlan'],
+                "idInversion" => $row['idInversion'],
+                "NroCuota" => $row['NroCuota'],
+                "FechaPrevistaPago" => $row['FechaPrevistaPago']
+                "FechaRealPago" => $row['FechaRealPago']
+                "InteresPagado" => $row['InteresPagado']
+                "CapitalPagado" => $row['CapitalPagado']
+                "DividendoPagado" => $row['DividendoPagado']
+                "idEstado" => $row['idEstado']
+            ];
+        }
+        // Retornar los resultados como JSON
+        header('Content-Type: application/json');
+        echo json_encode($response);
+    } else {
+        // Retornar un JSON vacío si no hay registros
+        header('Content-Type: application/json');
+        echo json_encode([]);
     }
 }
 
@@ -67,14 +140,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 } else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
-        $stmt = $mysql->prepare("SELECT * FROM PlanPagos WHERE idPlan=?");
-        $stmt->bind_param('i', $_GET['id']);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        echo json_encode($result->fetch_assoc());
-    } else {
-        $result = $mysql->query("SELECT * FROM PlanPagos");
-        echo json_encode($result->fetch_all(mysql;_ASSOC));
+        $id = $_GET['id'];
+        consultarPagoPorId($id)
+    } else if (isset($_GET['idInversion']) && !empty($_GET['idInversion'])) {
+        $id = $_GET['idInversion'];
+        consultarPagosPorInversion(id)
+    }  else {
+        echo "No se envio ningun parametro o no es valido";
     }
 }
 ?>

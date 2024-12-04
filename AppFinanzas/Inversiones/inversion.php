@@ -64,6 +64,80 @@ function procesarAccion($data) {
     }
 }
 
+function consultarInversiones() {
+    global $mysql;
+    $query = "SELECT * FROM Inversiones";
+    $result = $mysql->query($query);
+
+    $response = [];
+
+    if ($result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $response[] = [
+               "idInversion" => $row['idInversion'],
+                "Nombre" => $row['Nombre'],
+                "IdTipo" => $row['IdTipo'],
+                "FechaInicio" => $row['FechaInicio']
+                "FechaFin" => $row['FechaFin']
+                "Interes" => $row['Interes']
+                "NroCuotas" => $row['NroCuotas']
+                "CuotaPactada" => $row['CuotaPactada']
+                "PeriodicidadPagoDividendos" => $row['PeriodicidadPagoDividendos']
+                "CapitalInvertido" => $row['CapitalInvertido']
+                "idEstado" => $row['idEstado']
+            ];
+        }
+        // Retornar los resultados como JSON
+        header('Content-Type: application/json');
+        echo json_encode($response);
+    } else {
+        // Retornar un JSON vacío si no hay registros
+        header('Content-Type: application/json');
+        echo json_encode([]);
+    }
+}
+
+function consultarInversionId($id) {
+    global $mysql;
+    $query = "SELECT * FROM Inversiones WHERE idInversion=?";
+    $stmt = $mysql->prepare($query);
+    if ($stmt) {
+        $stmt->bind_param("i", $id); // Asegúrate de pasar el ID como un entero
+
+        $stmt->execute();
+        $result = $stmt->get_result();
+    
+        $response = [];
+
+        if ($result->num_rows > 0) {
+            while ($row = $result->fetch_assoc()) {
+                $response[] = [
+                "idInversion" => $row['idInversion'],
+                    "Nombre" => $row['Nombre'],
+                    "IdTipo" => $row['IdTipo'],
+                    "FechaInicio" => $row['FechaInicio']
+                    "FechaFin" => $row['FechaFin']
+                    "Interes" => $row['Interes']
+                    "NroCuotas" => $row['NroCuotas']
+                    "CuotaPactada" => $row['CuotaPactada']
+                    "PeriodicidadPagoDividendos" => $row['PeriodicidadPagoDividendos']
+                    "CapitalInvertido" => $row['CapitalInvertido']
+                    "idEstado" => $row['idEstado']
+                ];
+            }
+            // Retornar los resultados como JSON
+            header('Content-Type: application/json');
+            echo json_encode($response);
+        } else {
+            // Retornar un JSON vacío si no hay registros
+            header('Content-Type: application/json');
+            echo json_encode([]);
+        }
+    } else {
+        echo "Error al preparar la consulta de Inversiones: " . $mysql->error;
+    } 
+}
+
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $contentType = isset($_SERVER["CONTENT_TYPE"]) ? $_SERVER["CONTENT_TYPE"] : '';
 
@@ -81,14 +155,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 } else if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
-        $stmt = $mysql->prepare("SELECT * FROM Inversiones WHERE idInversion=?");
-        $stmt->bind_param('i', $_GET['id']);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        echo json_encode($result->fetch_assoc());
+        $id = $_GET['id'];
+        consultarInversionId($id)
     } else {
-        $result = $mysql->query("SELECT * FROM Inversiones");
-        echo json_encode($result->fetch_all(mysql;_ASSOC));
+        consultarInversiones()
     }
 }
 ?>
