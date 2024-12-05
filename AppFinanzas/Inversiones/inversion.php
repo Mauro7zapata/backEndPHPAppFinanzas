@@ -1,8 +1,6 @@
 <?php
 require_once("../db.php");
 
-echo "conecto";
-
 function procesarAccion($data) {
     global $mysql;
 
