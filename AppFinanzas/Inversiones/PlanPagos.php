@@ -69,7 +69,30 @@ function consultarPagosPorInversion($idInversion) {
     $stmt->bind_param("i", $idInversion);
     $stmt->execute();
     $result = $stmt->get_result();
-    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    $response = [];
+
+    if ($result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $response[] = [
+                "idPlan" => $row['idPlan'],
+                "idInversion" => $row['idInversion'],
+                "NroCuota" => $row['NroCuota'],
+                "FechaPrevistaPago" => $row['FechaPrevistaPago'],
+                "FechaRealPago" => $row['FechaRealPago'],
+                "InteresPagado" => $row['InteresPagado'],
+                "CapitalPagado" => $row['CapitalPagado'],
+                "DividendoPagado" => $row['DividendoPagado'],
+                "idEstado" => $row['IdEstado']
+            ];
+        }
+        // Retornar los resultados como JSON
+        header('Content-Type: application/json');
+        echo json_encode($response);
+    } else {
+        // Retornar un JSON vacío si no hay registros
+        header('Content-Type: application/json');
+        echo json_encode([]);
+    }
 }
 
 function consultarPagoPorId($id) {
@@ -97,7 +120,7 @@ function consultarPagoPorId($id) {
                 "InteresPagado" => $row['InteresPagado'],
                 "CapitalPagado" => $row['CapitalPagado'],
                 "DividendoPagado" => $row['DividendoPagado'],
-                "idEstado" => $row['idEstado']
+                "idEstado" => $row['IdEstado']
             ];
         }
         // Retornar los resultados como JSON
