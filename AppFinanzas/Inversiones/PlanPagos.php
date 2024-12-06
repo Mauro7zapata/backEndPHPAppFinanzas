@@ -75,7 +75,12 @@ function consultarPagosPorInversion($idInversion) {
 function consultarPagoPorId($id) {
     global $mysql;
     $query = "SELECT * FROM PlanPagos WHERE idPlan=?";
-    $stmt->bind_param('i', $id['id']);
+    $stmt = $mysql->prepare($query);
+    if (!$stmt) {
+        echo json_encode(['error' => $mysql->error]);
+        return;
+    }
+    $stmt->bind_param('i', $id);
     $stmt->execute();
     $result = $stmt->get_result();
     
