@@ -8,23 +8,25 @@ function procesarPlanPagos($data) {
 
     switch ($accion) {
         case 'crear':
-            $stmt = $mysql->prepare("INSERT INTO PlanPagos (idInversion, NroCuota, FechaPrevistaPago, FechaRealPago, InteresPagado, CapitalPagado, DividendoPagado,idEstado) VALUES (?, ?, ?, ?, ?, ?, ?,?)");
+            $stmt = $mysql->prepare("INSERT INTO PlanPagos (idInversion, NroCuota, FechaPrevistaPago, FechaRealPago, InteresPagado, CapitalPagado, DividendoPagado, idEstado) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            if (!$stmt) {
+                echo json_encode(['error' => $mysql->error]);
+                return;
+            }
             $stmt->bind_param('iissdddi', 
-                $data['idInversion'], 
-                $data['NroCuota'], 
-                $data['FechaPrevistaPago'], 
-                $data['FechaRealPago'], 
-                $data['InteresPagado'], 
-                $data['CapitalPagado'], 
-                $data['DividendoPagado'],
-                $data['idEstado']
-            );
+                $data['idInversion'], $data['NroCuota'], $data['FechaPrevistaPago'], 
+                $data['FechaRealPago'], $data['InteresPagado'], $data['CapitalPagado'], 
+                $data['DividendoPagado'], $data['idEstado']);
             $stmt->execute();
             echo json_encode(['id' => $mysql->insert_id]);
             break;
 
         case 'actualizar':
             $stmt = $mysql->prepare("UPDATE PlanPagos SET idInversion=?, NroCuota=?, FechaPrevistaPago=?, FechaRealPago=?, InteresPagado=?, CapitalPagado=?, DividendoPagado=?,idEstado=? WHERE idPlan=?");
+            if (!$stmt) {
+                echo json_encode(['error' => $mysql->error]);
+                return;
+            }
             $stmt->bind_param('iissdddii', 
                 $data['idInversion'], 
                 $data['NroCuota'], 
@@ -42,6 +44,10 @@ function procesarPlanPagos($data) {
 
         case 'eliminar':
             $stmt = $mysql->prepare("DELETE FROM PlanPagos WHERE idPlan=?");
+            if (!$stmt) {
+                echo json_encode(['error' => $mysql->error]);
+                return;
+            }
             $stmt->bind_param('i', $data['idPlan']);
             $stmt->execute();
             echo json_encode(['deleted' => $stmt->affected_rows > 0]);
@@ -54,40 +60,16 @@ function procesarPlanPagos($data) {
 
 function consultarPagosPorInversion($idInversion) {
     global $mysql;
-    $query = "SELECT * FROM Inversiones WHERE idInversion=?";
+    $query = "SELECT * FROM PlanPagos WHERE idInversion=?";
     $stmt = $mysql->prepare($query);
-    if ($stmt) {
-        $stmt->bind_param("i", $idInversion); // Asegúrate de pasar el ID como un entero
-
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $response = [];
-
-        if ($result->num_rows > 0) {
-            while ($row = $result->fetch_assoc()) {
-                $response[] = [
-                    "idPlan" => $row['idPlan'],
-                    "idInversion" => $row['idInversion'],
-                    "NroCuota" => $row['NroCuota'],
-                    "FechaPrevistaPago" => $row['FechaPrevistaPago'],
-                    "FechaRealPago" => $row['FechaRealPago'],
-                    "InteresPagado" => $row['InteresPagado'],
-                    "CapitalPagado" => $row['CapitalPagado'],
-                    "DividendoPagado" => $row['DividendoPagado'],
-                    "idEstado" => $row['idEstado']
-                ];
-            }
-            // Retornar los resultados como JSON
-            header('Content-Type: application/json');
-            echo json_encode($response);
-        } else {
-            // Retornar un JSON vacío si no hay registros
-            header('Content-Type: application/json');
-            echo json_encode([]);
-        }
-    } else {
-        echo "Error al preparar la consulta de Plan de Pagos: " . $mysql->error;
-    } 
+    if (!$stmt) {
+        echo json_encode(['error' => $mysql->error]);
+        return;
+    }
+    $stmt->bind_param("i", $idInversion);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
 }
 
 function consultarPagoPorId($id) {
