@@ -154,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         consultarPagoPorId($id);
     } else if (isset($_GET['idInversion']) && !empty($_GET['idInversion'])) {
         $id = $_GET['idInversion'];
-        consultarPagosPorInversion(id);
+        consultarPagosPorInversion($id);
     }  else {
         echo "No se envio ningun parametro o no es valido";
     }
