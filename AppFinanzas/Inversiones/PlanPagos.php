@@ -21,7 +21,7 @@ function procesarPlanPagos($data) {
                 $data['InteresPagado'], 
                 $data['CapitalPagado'], 
                 $data['DividendoPagado'],
-                $data['S'])
+                $data['idEstado'])
             $stmt->execute();
             echo json_encode(['id' => $mysql->insert_id]);
             break;
