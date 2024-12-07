@@ -14,14 +14,9 @@ function procesarPlanPagos($data) {
                 return;
             }
             $stmt->bind_param('iissdddi', 
-                $data['idInversion'], 
-                $data['NroCuota'], 
-                $data['FechaPrevistaPago'], 
-                $data['FechaRealPago'], 
-                $data['InteresPagado'], 
-                $data['CapitalPagado'], 
-                $data['DividendoPagado'],
-                $data['idEstado'])
+                $data['idInversion'], $data['NroCuota'], $data['FechaPrevistaPago'], 
+                $data['FechaRealPago'], $data['InteresPagado'], $data['CapitalPagado'], 
+                $data['DividendoPagado'], $data['idEstado']);
             $stmt->execute();
             echo json_encode(['id' => $mysql->insert_id]);
             break;
