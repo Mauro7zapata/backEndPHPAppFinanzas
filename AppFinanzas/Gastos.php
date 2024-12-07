@@ -312,14 +312,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
         $id = $_GET['id'];
         consultarGastosID($id);
-        // Obtener el ID del parámetro GET
     }else if (isset($_GET['mes']) && !empty($_GET['mes'])  && isset($_GET['anho']) && !empty($_GET['anho'])
-        && $_GET['detalle'] === 'totales') {
+        && $_GET['detalle'] === "totales") {
         $mes = $_GET['mes'];
         $anho = $_GET['anho'];
         consultarTotalesGastos($mes,$anho);
     } else if (isset($_GET['mes']) && !empty($_GET['mes'])  && isset($_GET['anho']) && !empty($_GET['anho'])
-        && $_GET['detalle'] === 'completo') {
+        && $_GET['detalle'] === "completo") {
         $mes = $_GET['mes'];
         $anho = $_GET['anho'];
         consultarGastosPorMesYAnho($mes, $anho);
