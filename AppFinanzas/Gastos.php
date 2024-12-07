@@ -324,7 +324,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $anho = $_GET['anho'];
         consultarGastosPorMesYAnho($mes, $anho);
     } else {
-        consultarGastos(); // Si no se pasa un ID, consultar todos los registros
+        echo "No se envio los parametros correctos" // Si no se pasa un ID, consultar todos los registros
     }
 }   
 
