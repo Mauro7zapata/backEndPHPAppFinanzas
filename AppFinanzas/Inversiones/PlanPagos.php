@@ -23,7 +23,7 @@ function procesarPlanPagos($data) {
                 $data['DividendoPagado'],
                 $data['idEstado'])
             $stmt->execute();
-            echo json_encode(['id' => $stmt->insert_id]);
+            echo json_encode(['id' => $mysql->insert_id]);
             break;
 
         case 'actualizar':
