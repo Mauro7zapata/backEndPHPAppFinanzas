@@ -73,7 +73,15 @@ function consultarTipoInversionId($id) {
         $result = $stmt->get_result();
 
         if ($result->num_rows > 0) {
-            echo json_encode($result->fetch_assoc());
+            $response = [];
+            while ($row = $result->fetch_assoc()) {
+                $response[] = [
+                    "idTipo" => $row['idTipo'],
+                    "Nombre" => $row['Nombre'],
+                    "Descripcion" => $row['Descripcion']
+                ];
+            }
+            echo json_encode($response);
         } else {
             echo json_encode([]);
         }
