@@ -101,7 +101,8 @@ function consultarMovimientoId($id) {
 
 function consultarMovimientosPorPresupuesto($idPresupuesto) {
     global $mysql;
-    $query = "SELECT m.*,g.idCategoria FROM movimientos m INNER JOIN gastos g ON m.idGasto = g.idGastos WHERE g.idPresupuesto = ?";
+    $query = "SELECT m.*,g.idCategoria FROM movimientos m 
+                INNER JOIN gastos g ON m.idGasto = g.idGastos WHERE g.idPresupuesto = ?";
     $stmt = $mysql->prepare($query);
 
     if ($stmt) {
@@ -151,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
         consultarMovimientoId($_GET['id']);
     }elseif (isset($_GET['idPresupuesto']) && !empty($_GET['idPresupuesto'])) {
-        consultarMovimientoId($_GET['idPresupuesto']);     
+        consultarMovimientosPorPresupuesto($_GET['idPresupuesto']);     
     } else {
         consultarMovimientos();
     }
