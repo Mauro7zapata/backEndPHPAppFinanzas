@@ -150,6 +150,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 } elseif ($_SERVER['REQUEST_METHOD'] == 'GET') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
         consultarMovimientoId($_GET['id']);
+    else if (isset($_GET['idPresupuesto']) && !empty($_GET['idPresupuesto'])) {
+        consultarMovimientoId($_GET['idPresupuesto']);     
+    }
     } else {
         consultarMovimientos();
     }
