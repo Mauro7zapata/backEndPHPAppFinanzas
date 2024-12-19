@@ -101,7 +101,7 @@ function consultarMovimientoId($id) {
 
 function consultarMovimientosPorPresupuesto($idPresupuesto) {
     global $mysql;
-    $query = "SELECT m.*,g.IdCategoria FROM movimientos m INNER JOIN gastos g ON m.idGasto = g.idGastos WHERE g.idPresupuesto = ?";
+    $query = "SELECT m.*,g.idCategoria FROM movimientos m INNER JOIN gastos g ON m.idGasto = g.idGastos WHERE g.idPresupuesto = ?";
     $stmt = $mysql->prepare($query);
 
     if ($stmt) {
@@ -120,7 +120,7 @@ function consultarMovimientosPorPresupuesto($idPresupuesto) {
                     "observacionMovimiento" => $row['observacionMovimiento'],
                     "fechaMovimiento" => $row['fechaMovimiento'],
                     "idGasto" => $row['idGasto']
-                    "IdCategoria"=> $row['IdCategoria']
+                    "idCategoria"=> $row['idCategoria']
                 ];
             }
             echo json_encode($response);
