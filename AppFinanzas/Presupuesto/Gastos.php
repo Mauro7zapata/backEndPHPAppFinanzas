@@ -93,6 +93,63 @@ function consultarGastosPorMesYAnho($mes, $anho) {
     echo json_encode($response);
 }
 
+function consultarGastosPorIdPresupuesto($idPresupuesto) {
+    global $mysql;
+
+    // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
+    $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
+                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento
+            FROM gastos g INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos
+            INNER JOIN estados e ON g.IdEstado = e.idEstado
+            INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
+            WHERE g.idPresupuesto = ?
+            order by c.NombreCategoria,g.NombreGasto";
+
+    // Preparar la consulta para evitar inyecciones SQL
+    $stmt = $mysql->prepare($query);
+
+    // Verificar si la consulta se preparó correctamente
+    if (!$stmt) {
+        echo "Error al preparar la consulta: " . $mysql->error;
+        return;
+    }
+
+    // Vincular los parámetros
+    $stmt->bind_param("i", $idPresupuesto);
+
+    // Ejecutar la consulta
+    $stmt->execute();
+
+    // Obtener los resultados
+    $result = $stmt->get_result();
+    $response = [];
+
+    // Procesar los resultados
+    if ($result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $response[] = [
+                "idGastos" => $row['idGastos'],
+                "NombreGasto" => $row['NombreGasto'],
+                "CostoPrevisto" => $row['CostoPrevisto'],
+                "CostoReal" => $row['CostoReal'],
+                "FechaLimite" => $row['FechaLimite'],
+                "Observaciones" => $row['Observaciones'],
+                "IdEstado" => $row['IdEstado'],
+                "IdCategoria" => $row['IdCategoria'],
+                "FechaPago" => $row['FechaPago'],
+                "idPresupuesto" => $row['idPresupuesto'],
+                "NombreEstado" => $row['NombreEstado'],
+                "NombreCategoria" => $row['NombreCategoria'],
+                "valorGastosMovimiento" => $row['valorGastosMovimiento']
+            ];
+        }
+    }
+
+    // Retornar los resultados como JSON
+    header('Content-Type: application/json');
+    echo json_encode($response);
+}
+
 function consultarGastosID($id) {
     global $mysql;
     $query = "SELECT idGastos, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, 
