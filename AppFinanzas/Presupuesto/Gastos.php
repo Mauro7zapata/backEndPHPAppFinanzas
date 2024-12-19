@@ -374,6 +374,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (isset($_GET['id']) && !empty($_GET['id'])) {
         $id = $_GET['id'];
         consultarGastosID($id);
+    }
+    else if (isset($_GET['idPresupuesto']) && !empty($_GET['idPresupuesto'])) {
+        $idPresupuesto = $_GET['idPresupuesto'];
+        consultarGastosPorIdPresupuesto($idPresupuesto);
     }else if (isset($_GET['mes']) && !empty($_GET['mes'])  && isset($_GET['anho']) && !empty($_GET['anho'])
         && $_GET['detalle'] === "totales") {
         $mes = $_GET['mes'];
