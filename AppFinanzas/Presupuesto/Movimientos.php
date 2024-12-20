@@ -68,7 +68,7 @@ function consultarMovimientos() {
 
 function consultarMovimientoId($id) {
     global $mysql;
-    $query = "SELECT m.*,g.IdCategoria FROM movimientos m INNER JOIN gastos g ON m.idGasto = g.idGastos WHERE m.idMovimiento = ?";
+    $query = "SELECT m.*,g.idCategoria FROM movimientos m INNER JOIN gastos g ON m.idGasto = g.idGastos WHERE m.idMovimiento = ?";
     $stmt = $mysql->prepare($query);
 
     if ($stmt) {
