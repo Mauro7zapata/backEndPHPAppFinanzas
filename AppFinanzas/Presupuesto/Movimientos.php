@@ -87,7 +87,7 @@ function consultarMovimientoId($id) {
                     "observacionMovimiento" => $row['observacionMovimiento'],
                     "fechaMovimiento" => $row['fechaMovimiento'],
                     "idGasto" => $row['idGasto'],
-                    "IdCategoria"=> $row['IdCategoria']
+                    "idCategoria"=> $row['idCategoria']
                 ];
             }
             echo json_encode($response);
