@@ -64,7 +64,7 @@ function procesarAccion($data) {
 
 function consultarInversiones() {
     global $mysql;
-    $query = "SELECT * FROM Inversiones";
+    $query = "SELECT * FROM Inversiones ORDER BY idEstado ASC";
     $result = $mysql->query($query);
 
     $response = [];
