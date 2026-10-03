@@ -90,7 +90,6 @@ function editarCategoriaGastos($data) {
     if ($stmt) {
         $stmt->bind_param("sssi", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $data['id']);
         if ($stmt->execute()) {
-            echo "query " . $data['NombreCategoria'];
             echo "Categoría de gasto actualizada correctamente.";
         } else {
             echo "Error al actualizar la categoría de gasto: " . $stmt->error;
@@ -105,6 +104,16 @@ function editarCategoriaGastos($data) {
 // Eliminar Categorías de Gastos
 function eliminarCategoriaGastos($id) {
     global $mysql;
+
+    // Evita dejar gastos huérfanos: las consultas hacen INNER JOIN con la categoría y desaparecerían del listado.
+    $stmtUso = $mysql->prepare("SELECT COUNT(*) AS total FROM gastos WHERE IdCategoria = ?");
+    $stmtUso->bind_param("i", $id);
+    $stmtUso->execute();
+    $enUso = (int)$stmtUso->get_result()->fetch_assoc()['total'];
+    if ($enUso > 0) {
+        echo "No se puede eliminar la categoría porque tiene $enUso gasto(s) asociados. Reasígnalos primero.";
+        return;
+    }
     $query = "DELETE FROM categoriagastos WHERE idCategoriaGastos=?";
     $stmt = $mysql->prepare($query);
     $stmt->bind_param(
@@ -163,7 +172,11 @@ function procesarAccion($data) {
             unset($data['accion']);
             editarCategoriaGastos($data);
         } elseif ($accion == 'eliminar') {
-            $id = $data['id'];
+            $id = appfinanzas_entero($data['id'] ?? null);
+            if ($id === null) {
+                echo "Identificador de categoría no válido.";
+                return;
+            }
             eliminarCategoriaGastos($id);
         } else {
             echo "Acción desconocida: $accion";

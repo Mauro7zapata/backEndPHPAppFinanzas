@@ -234,12 +234,32 @@ function consultarTotalesGastos($mes, $anho) {
 }
 
 
+// Valida los campos comunes de un gasto. Devuelve un mensaje de error o null si es válido.
+function validarGasto($data) {
+    if (trim($data['NombreGasto'] ?? '') === '') {
+        return "El nombre del gasto es obligatorio.";
+    }
+    if (!appfinanzas_monto_valido($data['CostoPrevisto'] ?? null)) {
+        return "El costo previsto no es válido.";
+    }
+    if (($data['CostoReal'] ?? '') !== '' && !appfinanzas_monto_valido($data['CostoReal'])) {
+        return "El costo real no es válido.";
+    }
+    return null;
+}
+
 function insertarGastos($data) {
     global $mysql;
-    
+
+    $errorValidacion = validarGasto($data);
+    if ($errorValidacion) {
+        echo "Error: " . $errorValidacion;
+        return;
+    }
+
     // Consultar idPresupuesto
-    $mes = $data['Mes'];
-    $anio = $data['Anho'];
+    $mes = $data['Mes'] ?? null;
+    $anio = $data['Anho'] ?? null;
     $consultaPresupuesto = "SELECT idPresupuesto FROM presupuestos WHERE Mes = ? AND Anho = ? LIMIT 1";
     
     $stmt = $mysql->prepare($consultaPresupuesto);
@@ -273,10 +293,14 @@ function insertarGastos($data) {
         $data['FechaPago']
     );
 
-    if ($stmt->execute()) {
+    try {
+        $stmt->execute();
         echo "Gasto insertado correctamente.";
-    } else {
-        echo "Error al insertar el gasto: " . $mysql->error;
+    } catch (mysqli_sql_exception $e) {
+        error_log('[AppFinanzas] insertarGastos: ' . $e->getMessage());
+        echo $e->getCode() == 1452
+            ? "Error al insertar el gasto: la categoría o el estado seleccionado no existe."
+            : "Error al insertar el gasto. Verifica los datos (fechas y valores).";
     }
 }
 
@@ -284,6 +308,12 @@ function insertarGastos($data) {
 // Editar Gasto
 function editarGastos($data) {
     global $mysql;
+
+    $errorValidacion = validarGasto($data);
+    if ($errorValidacion || appfinanzas_entero($data['id'] ?? null) === null) {
+        echo "Error: " . ($errorValidacion ?: "Identificador de gasto no válido.");
+        return;
+    }
 
     // sentencia de actualización
     $query = "UPDATE gastos 
@@ -305,16 +335,26 @@ function editarGastos($data) {
         $data['id']
     );
 
-    if ($stmt->execute()) {
+    try {
+        $stmt->execute();
         echo "Gasto actualizado correctamente.";
-    } else {
-        echo "Error al actualizar el gasto: " . $mysql->error;
+    } catch (mysqli_sql_exception $e) {
+        error_log('[AppFinanzas] editarGastos: ' . $e->getMessage());
+        echo $e->getCode() == 1452
+            ? "Error al actualizar el gasto: la categoría o el estado seleccionado no existe."
+            : "Error al actualizar el gasto. Verifica los datos (fechas y valores).";
     }
 }
 
 // Eliminar Gasto
 function eliminarGastos($id) {
     global $mysql;
+
+    $id = appfinanzas_entero($id);
+    if ($id === null || $id <= 0) {
+        echo "Error: Identificador de gasto no válido.";
+        return;
+    }
     $query = "DELETE FROM gastos WHERE idGastos=?";
     $stmt = $mysql->prepare($query);
     $stmt->bind_param(
@@ -322,10 +362,16 @@ function eliminarGastos($id) {
         $id
     );
 
-    if ($stmt->execute()) {
-        echo "Gasto eliminado correctamente.";
-    } else {
-        echo "Error al eliminar el Gasto: " . $mysql->error;
+    try {
+        $stmt->execute();
+        echo $stmt->affected_rows > 0 ? "Gasto eliminado correctamente." : "No se encontró el gasto a eliminar.";
+    } catch (mysqli_sql_exception $e) {
+        if ($e->getCode() == 1451) { // violación de llave foránea: tiene movimientos
+            echo "No se puede eliminar el gasto porque tiene movimientos registrados. Elimina primero sus movimientos.";
+        } else {
+            error_log('[AppFinanzas] eliminarGastos: ' . $e->getMessage());
+            echo "Error al eliminar el Gasto.";
+        }
     }
 }
 
@@ -338,14 +384,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         // Verificar si la decodificación fue exitosa
         if (is_array($data)) {
             foreach ($data as $item) {
-                $accion = $item['accion']; // Acción (insertar, editar, etc.)
+                $accion = $item['accion'] ?? ''; // Acción (insertar, editar, etc.)
 
                 if ($accion == 'insertar') {
                     insertarGastos($item);
                 } elseif ($accion == 'editar') {
                     editarGastos($item);
                 } elseif ($accion == 'eliminar') {
-                    $id = $item['id'];
+                    $id = $item['id'] ?? null;
                     eliminarGastos($id);
                 } else {
                     echo "Acción no válida: " . $accion;
@@ -356,7 +402,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     } else {
         // Solicitud del formulario
-        $accion = $_POST['accion'];
+        $accion = $_POST['accion'] ?? '';
         $tabla = "gastos";
         $data = $_POST; 
 
@@ -365,7 +411,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         } elseif ($accion == 'editar') {
             editarGastos($data);
         } elseif ($accion == 'eliminar') {
-            $id = $_POST['id'];
+            $id = $_POST['id'] ?? null;
             eliminarGastos($id);
         }
     }
@@ -379,12 +425,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $idPresupuesto = $_GET['idPresupuesto'];
         consultarGastosPorIdPresupuesto($idPresupuesto);
     }else if (isset($_GET['mes']) && !empty($_GET['mes'])  && isset($_GET['anho']) && !empty($_GET['anho'])
-        && $_GET['detalle'] === "totales") {
+        && ($_GET['detalle'] ?? '') === "totales") {
         $mes = $_GET['mes'];
         $anho = $_GET['anho'];
         consultarTotalesGastos($mes,$anho);
     } else if (isset($_GET['mes']) && !empty($_GET['mes'])  && isset($_GET['anho']) && !empty($_GET['anho'])
-        && $_GET['detalle'] === "completo") {
+        && ($_GET['detalle'] ?? '') === "completo") {
         $mes = $_GET['mes'];
         $anho = $_GET['anho'];
         consultarGastosPorMesYAnho($mes, $anho);

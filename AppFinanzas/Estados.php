@@ -108,6 +108,19 @@ function editarEstado($data) {
 // Eliminar Estado
 function eliminarEstado($id) {
     global $mysql;
+
+    // No eliminar estados en uso: gastos, inversiones y pagos dependen de ellos.
+    $stmtUso = $mysql->prepare(
+        "SELECT (SELECT COUNT(*) FROM gastos WHERE IdEstado = ?) +
+                (SELECT COUNT(*) FROM Inversiones WHERE idEstado = ?) +
+                (SELECT COUNT(*) FROM PlanPagos WHERE IdEstado = ?) AS total");
+    $stmtUso->bind_param("iii", $id, $id, $id);
+    $stmtUso->execute();
+    $enUso = (int)$stmtUso->get_result()->fetch_assoc()['total'];
+    if ($enUso > 0) {
+        echo "No se puede eliminar el estado porque está en uso en $enUso registro(s).";
+        return;
+    }
     $query = "DELETE FROM estados WHERE idEstado=?";
     $stmt = $mysql->prepare($query);
     $stmt->bind_param(
@@ -131,7 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         // Verificar si la data es un array
         if (is_array($data)) {
             foreach ($data as $item) {
-                $accion = $item['accion']; // Acción (insertar, editar, eliminar)
+                $accion = $item['accion'] ?? ''; // Acción (insertar, editar, eliminar)
                 $tabla = "estados"; // Tabla para mantener consistencia
 
                 // Procesar cada acción basada en el JSON recibido
@@ -153,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
     } else {
         // Solicitud de formulario
-        $accion = $_POST['accion'];
+        $accion = $_POST['accion'] ?? '';
         $tabla = "estados";
 
         if ($accion == 'insertar') {

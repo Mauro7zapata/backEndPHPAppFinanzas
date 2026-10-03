@@ -1,0 +1,3 @@
+# Credenciales y claves: nunca al repositorio
+AppFinanzas/config.local.php
+*.local.php

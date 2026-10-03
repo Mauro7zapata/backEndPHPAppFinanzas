@@ -3,6 +3,27 @@ require_once("../db.php");
 
 header('Content-Type: application/json');
 
+// Valida los datos de un movimiento. Devuelve un mensaje de error o null si es válido.
+function validarMovimiento($data) {
+    if (trim($data['tipoMovimiento'] ?? '') === '') {
+        return 'El tipo de movimiento es obligatorio';
+    }
+    if (!is_numeric($data['valorMovimiento'] ?? null) || $data['valorMovimiento'] == 0
+        || abs($data['valorMovimiento']) >= 100000000) {
+        return 'El valor del movimiento no es válido';
+    }
+    if (trim($data['nombreGasto'] ?? '') === '') {
+        return 'El nombre del gasto es obligatorio';
+    }
+    if (!appfinanzas_fecha_valida($data['fechaMovimiento'] ?? '')) {
+        return 'La fecha del movimiento no es válida (use AAAA-MM-DD)';
+    }
+    if (appfinanzas_entero($data['idGasto'] ?? null) === null) {
+        return 'El gasto asociado no es válido';
+    }
+    return null;
+}
+
 function procesarMovimiento($data) {
     global $mysql;
 
@@ -11,6 +32,7 @@ function procesarMovimiento($data) {
     try {
         switch ($accion) {
             case 'crear':
+                if ($error = validarMovimiento($data)) { echo json_encode(['error' => $error]); break; }
                 $stmt = $mysql->prepare("INSERT INTO movimientos (tipoMovimiento, valorMovimiento, nombreGasto, observacionMovimiento, fechaMovimiento, idGasto) VALUES (?, ?, ?, ?, ?, ?)");
                 if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('sdsssi', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto']);
@@ -19,6 +41,7 @@ function procesarMovimiento($data) {
                 break;
 
             case 'actualizar':
+                if ($error = validarMovimiento($data)) { echo json_encode(['error' => $error]); break; }
                 $stmt = $mysql->prepare("UPDATE movimientos SET tipoMovimiento = ?, valorMovimiento = ?, nombreGasto = ?, observacionMovimiento = ?, fechaMovimiento = ?, idGasto = ? WHERE idMovimiento = ?");
                 if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('sdsssii', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto'], $data['idMovimiento']);
@@ -37,8 +60,13 @@ function procesarMovimiento($data) {
             default:
                 echo json_encode(['error' => 'Acción no válida']);
         }
+    } catch (mysqli_sql_exception $e) {
+        error_log('[AppFinanzas] procesarMovimiento: ' . $e->getMessage());
+        // 1452: el gasto asociado no existe
+        echo json_encode(['error' => $e->getCode() == 1452 ? 'El gasto asociado no existe' : 'Error al procesar el movimiento']);
     } catch (Exception $e) {
-        echo json_encode(['error' => $e->getMessage()]);
+        error_log('[AppFinanzas] procesarMovimiento: ' . $e->getMessage());
+        echo json_encode(['error' => 'Error al procesar el movimiento']);
     }
 }
 
