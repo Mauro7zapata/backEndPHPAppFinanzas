@@ -60,7 +60,7 @@ function procesarPlanPagos($data) {
 
 function consultarPagosPorInversion($idInversion) {
     global $mysql;
-    $query = "SELECT * FROM PlanPagos WHERE idInversion=?";
+    $query = "SELECT * FROM PlanPagos WHERE idInversion=? ORDER BY NroCuota DESC";
     $stmt = $mysql->prepare($query);
     if (!$stmt) {
         echo json_encode(['error' => $mysql->error]);
