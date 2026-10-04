@@ -1,5 +1,26 @@
 # Changelog · Backend
 
+## 2026-10-04 (4) · Observaciones, plan que se recalcula y parámetros
+
+**Requiere ejecutar `sql/004_observaciones_configuracion.sql` en phpMyAdmin (copia de seguridad antes).**
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Observaciones por cuota | `sql/004_...sql`, `libInversiones.php`, `Inversiones/Cuotas.php` | Columna `PlanPagos.Observaciones` (500); `actualizar` y `cobrar` aceptan `observaciones`; acción nueva `observar`; las cuotas devuelven `observaciones` | Poder anotar algo sobre cada cuota | Campo opcional; contrato anterior intacto |
+| Plan que se recalcula | `libInversiones.php` (`invSincronizarPlan`), `Inversiones/inversion.php` | Si cambia la fecha final de una inversión con plazo, las cuotas pendientes se regeneran hasta la nueva fecha (octubre → diciembre: 7 → 9) y `NroCuotas` se actualiza; si se acorta, sobran y se eliminan solo las pendientes; **las cobradas no se tocan** y las observaciones se conservan; responde `plan {total, agregadas, eliminadas}` | Que el número de cuotas siga la fecha | Solo cuando cambia `FechaFin` (tipos con plazo; no acciones ni ganancia fija) |
+| Recalcular siguientes | `Inversiones/Cuotas.php` | `actualizar` con `recalcularSiguientes: true` corre las cuotas pendientes siguientes mes a mes desde la nueva fecha | Al mover una fecha, las demás la siguen | Opcional; por defecto no cambia nada |
+| Nota en la notificación | `Deudas/Alertas.php`, `lib.php` | `pagarGasto` y `cobrarCuota` aceptan `observaciones` (se guarda en el movimiento / en la cuota) | Escribir una observación al tocar "Ya pagué/Ya cobré" | Opcional |
+| Parámetros | `sql/004_...sql`, `lib.php`, `Configuracion/Parametros.php` (nuevo) | Tabla `configuracion` (clave/valor) con días de aviso, día de inicio del mes financiero, % de alerta del presupuesto; GET/POST validados por rangos | Configurar la app sin tocar código | Sin la migración se usan los valores por defecto |
+| Mes financiero | `Inicio/Dashboard.php`, `lib.php` | El mes actual, los días restantes y el gasto diario usan el día de inicio configurado (inicio el 25: del 25 oct al 24 nov es "octubre"); aviso al alcanzar el % del presupuesto configurado; la agenda trae `idInversion` y `mes/anho` | Meses que empiezan el día de pago | Con inicio = 1 todo queda igual que antes |
+| Plantilla con check | `Presupuesto/Plantilla.php`, `sql/004_...sql` | Tabla `plantilla_gastos` (nombre + categoría) y acciones `marcar` / `?marcados=1`; si hay gastos marcados la plantilla son exactamente esos (valor y día de su aparición más reciente), si no hay ninguno se mantiene la detección automática | Elegir con un check qué gastos se repiten cada mes | Compatible: sin marcas todo funciona como antes |
+| Avisos | `Deudas/Alertas.php` | Los días de anticipación por defecto salen de los parámetros | Configurable desde la app | Igual que antes si no se cambian |
+
+## 2026-10-04 (3) · Alertas con destino
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Alertas | `Deudas/Alertas.php` | Las alertas de cobro incluyen `idInversion`; las de gasto incluyen `mes` y `anho` de su presupuesto | Que al tocar la notificación la app abra directamente la inversión o el presupuesto | Campos nuevos; los anteriores no cambian |
+
 ## 2026-10-04 (2) · Resumen para la pantalla de inicio
 
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |

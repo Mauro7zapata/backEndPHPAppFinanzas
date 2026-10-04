@@ -11,7 +11,12 @@ header('Content-Type: application/json; charset=utf-8');
 // destino (mínimo 2 apariciones). Los gastos marcados "No aplica" no cuentan.
 // Los valores sugeridos (costo y día límite) salen de su aparición más reciente.
 //
+// Si el usuario marcó gastos con el check "Repetir cada mes" (tabla plantilla_gastos), la plantilla
+// son exactamente esos gastos; si no hay ninguno marcado se usa la detección automática de arriba.
+//
 //   GET  Plantilla.php?mes=2&anho=2026          -> lista de gastos sugeridos
+//   GET  Plantilla.php?marcados=1               -> [{nombre, idCategoria}] gastos marcados
+//   POST Plantilla.php {accion:'marcar', nombre, idCategoria, marcado:true|false}  -> marca o desmarca un gasto
 //   POST Plantilla.php {mes, anho, nombres?[]}  -> crea los gastos en el
 //        presupuesto de ese mes (todos los sugeridos, o solo los de "nombres").
 
@@ -31,12 +36,26 @@ function buscarPresupuesto($mes, $anho) {
     return $fila ? (int)$fila['idPresupuesto'] : null;
 }
 
+// Gastos marcados por el usuario: [clave => true]. Vacío si no hay ninguno (o si falta la migración 004).
+function plantillaMarcados() {
+    global $mysql;
+    $m = [];
+    try {
+        $res = $mysql->query("SELECT Nombre, IdCategoria FROM plantilla_gastos");
+        foreach ($res->fetch_all(MYSQLI_ASSOC) as $f) $m[claveGasto($f['Nombre'], $f['IdCategoria'])] = true;
+    } catch (mysqli_sql_exception $e) {
+    }
+    return $m;
+}
+
 function gastosFrecuentes($mes, $anho) {
     global $mysql;
     $indice = $anho * 12 + $mes;
+    $marcados = plantillaMarcados();
 
     // Presupuestos anteriores más recientes.
-    $stmt = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE (Anho * 12 + Mes) < ? ORDER BY (Anho * 12 + Mes) DESC LIMIT " . MESES_ANALISIS);
+    $limite = $marcados ? 36 : MESES_ANALISIS;
+    $stmt = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE (Anho * 12 + Mes) < ? ORDER BY (Anho * 12 + Mes) DESC LIMIT " . $limite);
     $stmt->bind_param('i', $indice);
     $stmt->execute();
     $ids = array_map(function ($r) { return (int)$r['idPresupuesto']; }, $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
@@ -56,6 +75,7 @@ function gastosFrecuentes($mes, $anho) {
     $grupos = [];
     while ($f = $res->fetch_assoc()) {
         $k = claveGasto($f['NombreGasto'], $f['IdCategoria']);
+        if ($marcados && !isset($marcados[$k])) continue;
         if (!isset($grupos[$k])) {
             // Primera fila = aparición más reciente
             $dia = $f['FechaLimite'] ? (int)substr($f['FechaLimite'], 8, 2) : null;
@@ -67,6 +87,7 @@ function gastosFrecuentes($mes, $anho) {
                 'diaLimite' => $dia,
                 'observaciones' => $f['Observaciones'],
                 'idDeuda' => $f['idDeuda'] !== null ? (int)$f['idDeuda'] : null,
+                'marcado' => (bool)$marcados,
                 'meses' => [],
             ];
         }
@@ -76,7 +97,7 @@ function gastosFrecuentes($mes, $anho) {
     $salida = [];
     foreach ($grupos as $g) {
         $apariciones = count($g['meses']);
-        if ($apariciones < $umbral) continue;
+        if (!$marcados && $apariciones < $umbral) continue;
         $g['frecuencia'] = $apariciones;
         $g['mesesAnalizados'] = count($ids);
         unset($g['meses']);
@@ -162,7 +183,34 @@ function aplicarPlantilla($data) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!is_array($input)) $input = $_POST;
+    if (($input['accion'] ?? '') === 'marcar') {
+        $nombre = trim((string)($input['nombre'] ?? ''));
+        $cat = appfinanzas_entero($input['idCategoria'] ?? null);
+        if ($nombre === '' || mb_strlen($nombre, 'UTF-8') > 255 || $cat === null) { echo json_encode(['error' => 'Gasto no válido']); exit; }
+        try {
+            if (!empty($input['marcado'])) {
+                $stmt = $mysql->prepare("INSERT IGNORE INTO plantilla_gastos (Nombre, IdCategoria) VALUES (?, ?)");
+            } else {
+                $stmt = $mysql->prepare("DELETE FROM plantilla_gastos WHERE Nombre = ? AND IdCategoria = ?");
+            }
+            $stmt->bind_param('si', $nombre, $cat);
+            $stmt->execute();
+            echo json_encode(['marcado' => !empty($input['marcado'])]);
+        } catch (mysqli_sql_exception $e) {
+            error_log('[AppFinanzas] Plantilla: ' . $e->getMessage());
+            echo json_encode(['error' => 'No se pudo guardar. ¿Ejecutaste la migración 004?']);
+        }
+        exit;
+    }
     aplicarPlantilla($input);
+} elseif (isset($_GET['marcados'])) {
+    $m = [];
+    try {
+        $res = $mysql->query("SELECT Nombre, IdCategoria FROM plantilla_gastos ORDER BY Nombre");
+        foreach ($res->fetch_all(MYSQLI_ASSOC) as $f) $m[] = ['nombre' => $f['Nombre'], 'idCategoria' => (int)$f['IdCategoria']];
+    } catch (mysqli_sql_exception $e) {
+    }
+    echo json_encode($m, JSON_UNESCAPED_UNICODE);
 } else {
     $mes = appfinanzas_entero($_GET['mes'] ?? null);
     $anho = appfinanzas_entero($_GET['anho'] ?? null);

@@ -10,6 +10,7 @@ header('Content-Type: application/json; charset=utf-8');
 //   GET  Alertas.php[?dias=3&diasObligaciones=30]
 //        -> pagos por vencer o vencidos (gastos Pendiente/En proceso con fecha límite), obligaciones
 //           anuales próximas a vencer y cortes de tarjeta próximos.
+//   (pagarGasto y cobrarCuota aceptan además 'observaciones': nota opcional que escribe el usuario en la notificación)
 //   POST Alertas.php {accion:'pagarGasto', idGasto}        -> registra un movimiento por lo que falta del gasto
 //   POST Alertas.php {accion:'pagarObligacion', idObligacion} -> cierra el ciclo (vencimiento +1 año)
 //   POST Alertas.php {accion:'cobrarCuota', idPlan}           -> marca como cobrada una cuota de una inversión (tipo 'cobro')
@@ -23,8 +24,9 @@ function alertas($dias, $diasObligaciones) {
     $hoy = new DateTime('today');
 
     // Pagos del presupuesto: vencen en los próximos $dias o vencieron hace menos de 60 días.
-    $stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento, g.FechaLimite, g.idDeuda, e.NombreEstado
+    $stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento, g.FechaLimite, g.idDeuda, e.NombreEstado, pr.Mes, pr.Anho
         FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado
+        LEFT JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto
         WHERE e.NombreEstado IN ('Pendiente','En proceso') AND g.FechaLimite IS NOT NULL
           AND g.FechaLimite <= ? AND g.FechaLimite >= ?
         ORDER BY g.FechaLimite");
@@ -45,12 +47,14 @@ function alertas($dias, $diasObligaciones) {
             'vencida' => $d < 0,
             'valor' => $falta,
             'esDeuda' => $g['idDeuda'] !== null,
+            'mes' => $g['Mes'] !== null ? (int)$g['Mes'] : null,
+            'anho' => $g['Anho'] !== null ? (int)$g['Anho'] : null,
             'persistente' => true,
         ];
     }
 
     // Cobros de inversiones: cuotas por cobrar que vencen en los próximos $dias o vencieron hace menos de 60 días.
-    $stmt = $mysql->prepare("SELECT p.idPlan, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre
+    $stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre
         FROM PlanPagos p
         INNER JOIN Inversiones i ON i.idInversion = p.idInversion
         INNER JOIN estados ei ON ei.idEstado = i.idEstado AND ei.NombreEstado = 'Desembolsado'
@@ -66,6 +70,7 @@ function alertas($dias, $diasObligaciones) {
             'clave' => 'cobro-' . $c['idPlan'],
             'tipo' => 'cobro',
             'id' => (int)$c['idPlan'],
+            'idInversion' => (int)$c['idInversion'],
             'titulo' => trim($c['Nombre']) . ' · cuota ' . $c['NroCuota'],
             'fecha' => $c['FechaPrevistaPago'],
             'diasRestantes' => $d,
@@ -124,13 +129,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'pagarGasto':
                 $id = appfinanzas_entero($d['idGasto'] ?? null);
                 if ($id === null) { echo json_encode(['error' => 'Identificador no válido']); break; }
-                $valor = registrarPagoGasto($id);
+                $valor = registrarPagoGasto($id, $d['observaciones'] ?? null);
                 echo json_encode($valor === null ? ['error' => 'El gasto no existe'] : ['pagado' => $valor]);
                 break;
             case 'cobrarCuota':
                 $id = appfinanzas_entero($d['idPlan'] ?? null);
                 if ($id === null) { echo json_encode(['error' => 'Identificador no válido']); break; }
-                $r = invCobrarCuota($id);
+                $r = invCobrarCuota($id, null, null, null, null, $d['observaciones'] ?? null);
                 echo json_encode($r === null ? ['error' => 'La cuota no existe'] : $r);
                 break;
             case 'pagarObligacion':
@@ -150,7 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo json_encode(['error' => 'Error al procesar la acción']);
     }
 } else {
-    $dias = min(30, max(0, appfinanzas_entero($_GET['dias'] ?? null) ?? 3));
-    $diasObl = min(120, max(0, appfinanzas_entero($_GET['diasObligaciones'] ?? null) ?? 30));
+    $dias = min(30, max(0, appfinanzas_entero($_GET['dias'] ?? null) ?? parametroApp('dias_aviso_pagos')));
+    $diasObl = min(120, max(0, appfinanzas_entero($_GET['diasObligaciones'] ?? null) ?? parametroApp('dias_aviso_obligaciones')));
     alertas($dias, $diasObl);
 }

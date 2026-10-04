@@ -283,6 +283,9 @@ function insertarGastos($data) {
         return;
     }
 
+    // FechaPago vacía = sin pago: se guarda NULL (antes quedaba '0000-00-00').
+    if (!isset($data['FechaPago']) || $data['FechaPago'] === '' || $data['FechaPago'] === '0000-00-00') { $data['FechaPago'] = null; }
+
     // Consultar idPresupuesto
     $mes = $data['Mes'] ?? null;
     $anio = $data['Anho'] ?? null;
@@ -341,6 +344,9 @@ function editarGastos($data) {
         echo "Error: " . ($errorValidacion ?: "Identificador de gasto no válido.");
         return;
     }
+
+    // FechaPago vacía = sin pago: se guarda NULL (antes quedaba '0000-00-00').
+    if (!isset($data['FechaPago']) || $data['FechaPago'] === '' || $data['FechaPago'] === '0000-00-00') { $data['FechaPago'] = null; }
 
     // sentencia de actualización
     $query = "UPDATE gastos 

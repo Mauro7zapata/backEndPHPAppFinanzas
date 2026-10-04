@@ -19,15 +19,18 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 
 $hoyTxt = date('Y-m-d');
 $hoy = new DateTime($hoyTxt);
-$mes = appfinanzas_entero($_GET['mes'] ?? null) ?? (int)$hoy->format('n');
-$anho = appfinanzas_entero($_GET['anho'] ?? null) ?? (int)$hoy->format('Y');
+$diaInicioMes = parametroApp('dia_inicio_mes');
+[$mesActualFin, $anhoActualFin] = mesFinanciero($hoyTxt, $diaInicioMes);
+$mes = appfinanzas_entero($_GET['mes'] ?? null) ?? $mesActualFin;
+$anho = appfinanzas_entero($_GET['anho'] ?? null) ?? $anhoActualFin;
 if ($mes < 1 || $mes > 12 || $anho < 2000 || $anho > 2100) {
     echo json_encode(['error' => 'Mes o año no válido']);
     exit;
 }
-$esMesActual = ($mes === (int)$hoy->format('n') && $anho === (int)$hoy->format('Y'));
-$diasMes = (int)date('t', mktime(0, 0, 0, $mes, 1, $anho));
-$diaActual = $esMesActual ? (int)$hoy->format('j') : $diasMes;
+$esMesActual = ($mes === $mesActualFin && $anho === $anhoActualFin);
+[$periodoIni, $periodoFin] = periodoFinanciero($mes, $anho, $diaInicioMes);
+$diasMes = (int)(new DateTime($periodoIni))->diff(new DateTime($periodoFin))->days + 1;
+$diaActual = $esMesActual ? (int)(new DateTime($periodoIni))->diff($hoy)->days + 1 : $diasMes;
 
 function dias_hasta($fecha) {
     global $hoy;
@@ -183,7 +186,7 @@ $inversiones = ['activas' => $inv['activas'], 'capitalActivo' => $inv['capitalAc
     'porCobrar30' => $inv['porCobrar30'], 'vencido' => $inv['vencido'], 'cuotasVencidas' => $inv['cuotasVencidas'],
     'rendimientoMensual' => $inv['rendimientoMensual'], 'necesitanCuota' => $inv['necesitanCuota']];
 
-$stmt = $mysql->prepare("SELECT p.idPlan, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre
+$stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre
     FROM PlanPagos p
     INNER JOIN Inversiones i ON i.idInversion = p.idInversion
     INNER JOIN estados ei ON ei.idEstado = i.idEstado AND ei.NombreEstado = 'Desembolsado'
@@ -196,20 +199,21 @@ $desde60 = date('Y-m-d', strtotime('-60 days'));
 $stmt->bind_param('ss', $hasta30, $desde60);
 $stmt->execute();
 foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $c) {
-    $agenda[] = ['tipo' => 'cobro', 'id' => (int)$c['idPlan'], 'titulo' => 'Cobrar a ' . trim($c['Nombre']) . ' · cuota ' . $c['NroCuota'],
+    $agenda[] = ['tipo' => 'cobro', 'id' => (int)$c['idPlan'], 'idInversion' => (int)$c['idInversion'], 'titulo' => 'Cobrar a ' . trim($c['Nombre']) . ' · cuota ' . $c['NroCuota'],
         'fecha' => $c['FechaPrevistaPago'], 'dias' => dias_hasta($c['FechaPrevistaPago']),
         'valor' => (float)$c['InteresPagado'] + (float)$c['CapitalPagado'] + (float)$c['DividendoPagado'], 'entra' => true];
 }
 
 // Pagos del presupuesto pendientes (vencidos hace menos de 60 días o dentro de 30 días).
-$stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento, g.FechaLimite
+$stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento, g.FechaLimite, pr.Mes AS mesP, pr.Anho AS anhoP
     FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado
+    INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto
     WHERE e.NombreEstado IN ('Pendiente','En proceso') AND g.FechaLimite IS NOT NULL AND g.FechaLimite <= ? AND g.FechaLimite >= ?
     ORDER BY g.FechaLimite LIMIT 12");
 $stmt->bind_param('ss', $hasta30, $desde60);
 $stmt->execute();
 foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $g) {
-    $agenda[] = ['tipo' => 'gasto', 'id' => (int)$g['idGastos'], 'titulo' => $g['NombreGasto'], 'fecha' => $g['FechaLimite'],
+    $agenda[] = ['tipo' => 'gasto', 'id' => (int)$g['idGastos'], 'mes' => (int)$g['mesP'], 'anho' => (int)$g['anhoP'], 'titulo' => $g['NombreGasto'], 'fecha' => $g['FechaLimite'],
         'dias' => dias_hasta($g['FechaLimite']), 'valor' => max(0.0, (float)$g['CostoPrevisto'] - (float)$g['valorGastosMovimiento']), 'entra' => false];
 }
 usort($agenda, function ($a, $b) { return strcmp($a['fecha'], $b['fecha']) ?: strcmp($a['titulo'], $b['titulo']); });
@@ -272,6 +276,8 @@ if ($presupuesto['existe'] && $presupuesto['total'] > 0) {
     $uso = $presupuesto['porcentajeUsado'];
     if ($presupuesto['pagado'] > $presupuesto['total']) {
         $mensajes[] = ['emoji' => '🚨', 'titulo' => 'Superaste el presupuesto por ' . pesos($presupuesto['pagado'] - $presupuesto['total']), 'detalle' => 'Revisa en qué categorías se fue más y ajusta lo que queda del mes.', 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver presupuesto'];
+    } elseif (($umbral = parametroApp('porcentaje_alerta_presupuesto')) > 0 && $uso * 100 >= $umbral) {
+        $mensajes[] = ['emoji' => '⚠️', 'titulo' => 'Ya usaste el ' . round($uso * 100) . '% del presupuesto', 'detalle' => 'Tu aviso está en ' . $umbral . '%. Te quedan ' . pesos(max(0, $presupuesto['total'] - $presupuesto['pagado'])) . ' para el resto del mes.', 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver presupuesto'];
     } elseif ($esMesActual && $diaActual >= 5 && $uso > $presupuesto['porcentajeMes'] + 0.15) {
         $mensajes[] = ['emoji' => '📈', 'titulo' => 'Vas rápido: ' . round($uso * 100) . '% del presupuesto en el ' . round($presupuesto['porcentajeMes'] * 100) . '% del mes', 'detalle' => 'Si sigues a este ritmo cerrarías cerca de ' . pesos($presupuesto['proyeccionCierre'] ?? 0) . '.', 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver detalle'];
     } elseif ($esMesActual && $diaActual >= 5 && $presupuesto['pagado'] > 0 && $uso <= $presupuesto['porcentajeMes']) {

@@ -192,7 +192,7 @@ function invProponerCuota($inv, $cuotas, $modo) {
 
 // Genera (o simula) todas las cuotas que faltan hasta que la inversión se pague.
 // Devuelve [ok, cuotas => [...], mensaje?]. Si $guardar es true las inserta como Pendiente.
-function invGenerarCuotas($idInversion, $guardar) {
+function invGenerarCuotas($idInversion, $guardar, $conTransaccion = true) {
     global $mysql;
     $inv = invCargar($idInversion);
     if (!$inv) return ['ok' => false, 'mensaje' => 'La inversión no existe'];
@@ -221,7 +221,7 @@ function invGenerarCuotas($idInversion, $guardar) {
 
     if ($guardar) {
         $pendiente = invEstadoId('Pagos', 'Pendiente');
-        $mysql->begin_transaction();
+        if ($conTransaccion) $mysql->begin_transaction();
         try {
             $stmt = $mysql->prepare("INSERT INTO PlanPagos (idInversion, NroCuota, FechaPrevistaPago, FechaRealPago, InteresPagado, CapitalPagado, DividendoPagado, IdEstado)
                 VALUES (?, ?, ?, NULL, ?, ?, ?, ?)");
@@ -229,18 +229,40 @@ function invGenerarCuotas($idInversion, $guardar) {
                 $stmt->bind_param('iisdddi', $idInversion, $c['nroCuota'], $c['fechaPrevista'], $c['interes'], $c['capital'], $c['dividendo'], $pendiente);
                 $stmt->execute();
             }
-            $mysql->commit();
+            if ($conTransaccion) $mysql->commit();
         } catch (Throwable $e) {
-            $mysql->rollback();
+            if ($conTransaccion) $mysql->rollback();
             throw $e;
         }
     }
     return ['ok' => true, 'cuotas' => $nuevas];
 }
 
+// Texto de observación limpio (máx. 500 caracteres) o null si viene vacío.
+function invObservacion($v) {
+    if ($v === null) return null;
+    $t = trim((string)$v);
+    return $t === '' ? null : mb_substr($t, 0, 500, 'UTF-8');
+}
+
+// Guarda la observación de una cuota. Si ya tenía una distinta, la nueva se anexa para no perder el historial.
+function invGuardarObservacion($idPlan, $texto, $anexar = true) {
+    global $mysql;
+    if ($anexar) {
+        $q = $mysql->prepare("SELECT Observaciones FROM PlanPagos WHERE idPlan = ?");
+        $q->bind_param('i', $idPlan); $q->execute();
+        $fila = $q->get_result()->fetch_assoc();
+        $previa = trim((string)($fila['Observaciones'] ?? ''));
+        if ($previa !== '' && $previa !== $texto && strpos($previa, $texto) === false) $texto = mb_substr($previa . ' · ' . $texto, 0, 500, 'UTF-8');
+    }
+    $stmt = $mysql->prepare("UPDATE PlanPagos SET Observaciones = ? WHERE idPlan = ?");
+    $stmt->bind_param('si', $texto, $idPlan);
+    $stmt->execute();
+}
+
 // Marca una cuota como cobrada. Ajusta importes si se envían. Liquida la inversión si ya no queda nada por cobrar.
 // Devuelve null si la cuota no existe; si no, ['cobrada' => true, 'liquidada' => bool].
-function invCobrarCuota($idPlan, $fecha = null, $interes = null, $capital = null, $dividendo = null) {
+function invCobrarCuota($idPlan, $fecha = null, $interes = null, $capital = null, $dividendo = null, $observaciones = null) {
     global $mysql;
     $stmt = $mysql->prepare("SELECT idPlan, idInversion, InteresPagado, CapitalPagado, DividendoPagado FROM PlanPagos WHERE idPlan = ?");
     $stmt->bind_param('i', $idPlan);
@@ -257,8 +279,55 @@ function invCobrarCuota($idPlan, $fecha = null, $interes = null, $capital = null
     $stmt = $mysql->prepare("UPDATE PlanPagos SET IdEstado = ?, FechaRealPago = ?, InteresPagado = ?, CapitalPagado = ?, DividendoPagado = ? WHERE idPlan = ?");
     $stmt->bind_param('isdddi', $cobrado, $fecha, $interes, $capital, $dividendo, $idPlan);
     $stmt->execute();
+    $obs = invObservacion($observaciones);
+    if ($obs !== null) invGuardarObservacion($idPlan, $obs);
 
     return ['cobrada' => true, 'liquidada' => invRevisarLiquidacion((int)$p['idInversion'])];
+}
+
+// Recalcula el plan cuando cambia la fecha final de una inversión con plazo (p. ej. octubre -> diciembre: 7 -> 9 cuotas).
+//  - Las cuotas ya cobradas no se tocan nunca.
+//  - Las pendientes se regeneran hasta la nueva fecha final (si el plazo se acorta, sobran y se eliminan).
+//  - Las observaciones de las pendientes se conservan por número de cuota.
+// Devuelve ['total' => cuotas del plan, 'agregadas' => n, 'eliminadas' => n] o null si no aplica.
+function invSincronizarPlan($idInversion) {
+    global $mysql;
+    $inv = invCargar($idInversion);
+    if (!$inv || $inv['NombreEstado'] !== 'Desembolsado') return null;
+    $tipo = (int)$inv['IdTipo'];
+    if (in_array($tipo, [INV_ACCIONES, INV_GANANCIA_FIJA], true) || invFecha($inv['FechaFin']) === null) return null;
+
+    $antes = invCuotas($idInversion);
+    $pendientesAntes = array_values(array_filter($antes, function ($c) { return !$c['cobrada']; }));
+    $obs = [];
+    foreach ($pendientesAntes as $c) if (!empty($c['Observaciones'])) $obs[(int)$c['NroCuota']] = $c['Observaciones'];
+
+    $mysql->begin_transaction();
+    try {
+        $stmt = $mysql->prepare("DELETE FROM PlanPagos WHERE idInversion = ? AND IdEstado <> ?");
+        $cobrado = invEstadoId('Pagos', 'Cobrado');
+        $stmt->bind_param('ii', $idInversion, $cobrado);
+        $stmt->execute();
+
+        $r = invGenerarCuotas($idInversion, true, false);
+        $nuevas = $r['ok'] ? count($r['cuotas']) : 0;
+
+        if ($obs) {
+            $up = $mysql->prepare("UPDATE PlanPagos SET Observaciones = ? WHERE idInversion = ? AND NroCuota = ? AND IdEstado <> ?");
+            foreach ($obs as $nro => $texto) { $up->bind_param('siii', $texto, $idInversion, $nro, $cobrado); $up->execute(); }
+        }
+        // El número de cuotas del plan se mantiene al día con el plazo.
+        $total = count(invCuotas($idInversion));
+        $up = $mysql->prepare("UPDATE Inversiones SET NroCuotas = ? WHERE idInversion = ?");
+        $up->bind_param('ii', $total, $idInversion);
+        $up->execute();
+        $mysql->commit();
+    } catch (Throwable $e) {
+        $mysql->rollback();
+        throw $e;
+    }
+    invRevisarLiquidacion($idInversion);
+    return ['total' => $total, 'agregadas' => max(0, $nuevas - count($pendientesAntes)), 'eliminadas' => max(0, count($pendientesAntes) - $nuevas)];
 }
 
 // Si ya se recuperó todo el capital y no quedan cuotas por cobrar, la inversión pasa a Liquidado.
@@ -369,6 +438,7 @@ function invCuotaJson($c, $hoy) {
         'valor' => $valor,
         'idEstado' => (int)$c['IdEstado'],
         'estado' => $c['NombreEstado'],
+        'observaciones' => $c['Observaciones'] ?? null,
         'cobrada' => $c['cobrada'],
         'diasRestantes' => $dias,
         'vencida' => $dias !== null && $dias < 0,

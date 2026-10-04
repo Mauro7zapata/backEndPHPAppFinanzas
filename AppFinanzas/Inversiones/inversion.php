@@ -82,10 +82,15 @@ function procesarAccion($data) {
                 } else {
                     $id = appfinanzas_entero($data['idInversion'] ?? null);
                     if ($id === null) { echo json_encode(['error' => 'Falta idInversion']); return; }
+                    $anterior = invCargar($id);
                     $stmt = $mysql->prepare("UPDATE Inversiones SET Nombre=?, IdTipo=?, CapitalInvertido=?, FechaInicio=?, FechaFin=?, Interes=?, NroCuotas=?, CuotaPactada=?, PeriodicidadPagoDividendos=?, idEstado=? WHERE idInversion=?");
                     $stmt->bind_param('sidssdidiii', $nombre, $tipo, $capital, $inicio, $fin, $tasa, $nro, $cuota, $per, $estado, $id);
                     $stmt->execute();
-                    echo json_encode(['updated' => $stmt->affected_rows > 0]);
+                    $actualizada = $stmt->affected_rows > 0;
+                    // Si cambió la fecha final, el plan se ajusta al nuevo plazo (las cuotas cobradas no se tocan).
+                    $plan = null;
+                    if ($anterior && invFecha($anterior['FechaFin']) !== $fin && $fin !== null) $plan = invSincronizarPlan($id);
+                    echo json_encode(['updated' => $actualizada || $plan !== null, 'plan' => $plan]);
                 }
                 break;
 

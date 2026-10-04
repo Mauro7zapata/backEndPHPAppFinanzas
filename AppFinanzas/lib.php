@@ -97,7 +97,7 @@ function resincronizarAbonosGasto($idGasto) {
 }
 
 // Registra un movimiento por lo que falta de un gasto (acción "Ya pagué"). Devuelve el valor registrado.
-function registrarPagoGasto($idGasto) {
+function registrarPagoGasto($idGasto, $observaciones = null) {
     global $mysql;
     $stmt = $mysql->prepare("SELECT NombreGasto, CostoPrevisto, valorGastosMovimiento FROM gastos WHERE idGastos = ?");
     $stmt->bind_param('i', $idGasto);
@@ -108,7 +108,8 @@ function registrarPagoGasto($idGasto) {
     if ($falta <= 0) return 0.0;
 
     $tipo = 'Gasto';
-    $obs = 'Pago registrado desde la notificación';
+    $nota = trim((string)$observaciones);
+    $obs = 'Pago registrado desde la notificación' . ($nota !== '' ? ': ' . mb_substr($nota, 0, 400, 'UTF-8') : '');
     $fecha = date('Y-m-d');
     $ins = $mysql->prepare("INSERT INTO movimientos (tipoMovimiento, valorMovimiento, nombreGasto, observacionMovimiento, fechaMovimiento, idGasto) VALUES (?, ?, ?, ?, ?, ?)");
     $ins->bind_param('sdsssi', $tipo, $falta, $g['NombreGasto'], $obs, $fecha, $idGasto);
@@ -195,4 +196,56 @@ function provisionarObligaciones($mes, $anho, $idPresupuesto) {
         $insertados++;
     }
     return ['insertados' => $insertados, 'omitidos' => $omitidos];
+}
+
+// ---------------------------------------------------------------- Parámetros de la app (tabla configuracion)
+
+// Valores por defecto y reglas de cada parámetro: [defecto, mínimo, máximo].
+const PARAMETROS_APP = [
+    'dias_aviso_pagos' => [3, 0, 30],                 // días de anticipación para avisar pagos y cobros
+    'dias_aviso_obligaciones' => [30, 0, 120],        // anticipación de las obligaciones anuales (SOAT, impuestos...)
+    'dia_inicio_mes' => [1, 1, 28],                   // día en que empieza el mes financiero (p. ej. 25 = pago de nómina)
+    'porcentaje_alerta_presupuesto' => [80, 0, 100],  // avisa al llegar a este % del presupuesto; 0 = desactivado
+];
+
+// Devuelve todos los parámetros como enteros (si la tabla no existe todavía, usa los valores por defecto).
+function parametrosApp() {
+    global $mysql;
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $cache = [];
+    foreach (PARAMETROS_APP as $k => $r) $cache[$k] = $r[0];
+    try {
+        $res = $mysql->query("SELECT Clave, Valor FROM configuracion");
+        foreach ($res->fetch_all(MYSQLI_ASSOC) as $f) {
+            if (isset(PARAMETROS_APP[$f['Clave']]) && is_numeric($f['Valor'])) {
+                $r = PARAMETROS_APP[$f['Clave']];
+                $cache[$f['Clave']] = max($r[1], min($r[2], (int)$f['Valor']));
+            }
+        }
+    } catch (mysqli_sql_exception $e) {
+        // Migración 004 sin ejecutar: se usan los valores por defecto.
+    }
+    return $cache;
+}
+
+function parametroApp($clave) {
+    return parametrosApp()[$clave] ?? (PARAMETROS_APP[$clave][0] ?? null);
+}
+
+// Mes financiero que contiene la fecha dada. Se nombra por el mes en que empieza:
+// con inicio el 25, del 25 de octubre al 24 de noviembre es "octubre".
+function mesFinanciero($fechaTxt, $diaInicio) {
+    $f = new DateTime($fechaTxt);
+    $mes = (int)$f->format('n'); $anho = (int)$f->format('Y');
+    if ((int)$f->format('j') < $diaInicio) { $mes--; if ($mes < 1) { $mes = 12; $anho--; } }
+    return [$mes, $anho];
+}
+
+// Primer día y último día (Y-m-d) del mes financiero $mes/$anho.
+function periodoFinanciero($mes, $anho, $diaInicio) {
+    $ini = sprintf('%04d-%02d-%02d', $anho, $mes, $diaInicio);
+    $m2 = $mes + 1; $a2 = $anho; if ($m2 > 12) { $m2 = 1; $a2++; }
+    $fin = date('Y-m-d', strtotime(sprintf('%04d-%02d-%02d', $a2, $m2, $diaInicio) . ' -1 day'));
+    return [$ini, $fin];
 }
