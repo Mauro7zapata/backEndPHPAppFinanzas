@@ -26,8 +26,9 @@ if (!$u) {
     $u = authBuscarPorCorreo($g['correo']);
     if ($u) {
         if (!empty($u['GoogleSub']) && $u['GoogleSub'] !== $g['sub']) appfinanzas_responder_error(409, 'Ese correo ya está vinculado a otra cuenta de Google');
-        $q = $mysql->prepare("UPDATE usuarios SET GoogleSub = ?, Nombre = COALESCE(Nombre, NULLIF(?, '')) WHERE IdUsuario = ?");
-        $q->bind_param('ssi', $g['sub'], $g['nombre'], $u['IdUsuario']);
+        $nombreFinal = ($u['Nombre'] !== null && $u['Nombre'] !== '') ? $u['Nombre'] : ($g['nombre'] !== '' ? $g['nombre'] : null);
+        $q = $mysql->prepare("UPDATE usuarios SET GoogleSub = ?, Nombre = ? WHERE IdUsuario = ?");
+        $q->bind_param('ssi', $g['sub'], $nombreFinal, $u['IdUsuario']);
         $q->execute();
         $q->close();
         $u = authBuscarPorId((int)$u['IdUsuario']);

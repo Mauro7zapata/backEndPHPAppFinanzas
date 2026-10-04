@@ -29,8 +29,10 @@ if ($u) {
             authFalloIntento($correo);
             appfinanzas_responder_error(403, 'Esta cuenta ya tiene datos. Ingresa el código de la cuenta inicial para reclamarla.');
         }
-        $q = $mysql->prepare("UPDATE usuarios SET ClaveHash = ?, Nombre = COALESCE(NULLIF(?, ''), Nombre) WHERE IdUsuario = ? AND ClaveHash IS NULL AND GoogleSub IS NULL");
-        $q->bind_param('ssi', $hash, $nombre, $u['IdUsuario']);
+        // El nombre se decide en PHP (sin COALESCE/NULLIF en SQL: mezclar el parámetro con la columna causa "Illegal mix of collations").
+        $nombreFinal = $nombre !== '' ? $nombre : $u['Nombre'];
+        $q = $mysql->prepare("UPDATE usuarios SET ClaveHash = ?, Nombre = ? WHERE IdUsuario = ? AND ClaveHash IS NULL AND GoogleSub IS NULL");
+        $q->bind_param('ssi', $hash, $nombreFinal, $u['IdUsuario']);
         $q->execute();
         $q->close();
         authRespuestaSesion(authBuscarPorId((int)$u['IdUsuario']));
