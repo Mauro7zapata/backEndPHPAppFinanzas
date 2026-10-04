@@ -17,6 +17,9 @@ return [
     // en la app con el mismo correo de la migración. Cámbialo por un valor aleatorio y bórralo cuando ya la reclames.
     'codigo_cuenta_inicial' => 'CAMBIAR_POR_UN_CODIGO_ALEATORIO',
 
+    // SOLO para diagnosticar: true muestra la causa real de los "Error interno del servidor". Déjalo en false o bórralo.
+    'depurar' => false,
+
     // ID(s) de cliente OAuth "Web" de Google Cloud para "Continuar con Google" (el mismo que va en la app,
     // secrets.properties -> google.web.client.id). Vacío = el acceso con Google queda desactivado.
     'google_client_ids' => [

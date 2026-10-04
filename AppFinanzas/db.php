@@ -27,7 +27,9 @@ function appfinanzas_responder_error($codigo, $mensaje)
 // Cualquier excepción no controlada (p. ej. error SQL) se registra y responde un error genérico.
 set_exception_handler(function ($e) {
     error_log('[AppFinanzas] ' . get_class($e) . ': ' . $e->getMessage() . ' en ' . $e->getFile() . ':' . $e->getLine());
-    appfinanzas_responder_error(500, 'Error interno del servidor');
+    // Con 'depurar' => true en config.local.php (solo para diagnosticar) el mensaje incluye la causa real.
+    $detalle = !empty($GLOBALS['appfinanzas_depurar']) ? ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')' : '';
+    appfinanzas_responder_error(500, 'Error interno del servidor' . $detalle);
 });
 
 header('X-Content-Type-Options: nosniff');
@@ -39,6 +41,7 @@ if (!is_file($rutaConfig)) {
     appfinanzas_responder_error(500, 'Servidor sin configurar');
 }
 $config = require $rutaConfig;
+$GLOBALS['appfinanzas_depurar'] = !empty($config['depurar']);
 foreach (['host', 'user', 'password', 'db'] as $clave) {
     if (!isset($config[$clave]) || $config[$clave] === '') {
         error_log('[AppFinanzas] Configuración incompleta, falta: ' . $clave);
