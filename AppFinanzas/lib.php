@@ -303,19 +303,24 @@ function diaInicioEnMes($mes, $anho, $diaInicio) {
     return min((int)$diaInicio, (int)date('t', mktime(0, 0, 0, $mes, 1, $anho)));
 }
 
-// Mes financiero que contiene la fecha dada. Se nombra por el mes en que empieza:
-// con inicio el 25, del 25 de octubre al 24 de noviembre es "octubre".
+// Mes financiero que contiene la fecha dada. Se nombra por el mes en que TERMINA:
+// con inicio el 28, el 28 de septiembre empieza "octubre" (del 28/sep al 27/oct). Con inicio el día 1 es el mes calendario.
 function mesFinanciero($fechaTxt, $diaInicio) {
     $f = new DateTime($fechaTxt);
     $mes = (int)$f->format('n'); $anho = (int)$f->format('Y');
-    if ((int)$f->format('j') < diaInicioEnMes($mes, $anho, $diaInicio)) { $mes--; if ($mes < 1) { $mes = 12; $anho--; } }
+    if ((int)$diaInicio > 1 && (int)$f->format('j') >= diaInicioEnMes($mes, $anho, $diaInicio)) {
+        $mes++; if ($mes > 12) { $mes = 1; $anho++; }
+    }
     return [$mes, $anho];
 }
 
 // Primer día y último día (Y-m-d) del mes financiero $mes/$anho.
 function periodoFinanciero($mes, $anho, $diaInicio) {
-    $ini = sprintf('%04d-%02d-%02d', $anho, $mes, diaInicioEnMes($mes, $anho, $diaInicio));
-    $m2 = $mes + 1; $a2 = $anho; if ($m2 > 12) { $m2 = 1; $a2++; }
-    $siguiente = sprintf('%04d-%02d-%02d', $a2, $m2, diaInicioEnMes($m2, $a2, $diaInicio));
+    if ((int)$diaInicio <= 1) {
+        return [sprintf('%04d-%02d-01', $anho, $mes), date('Y-m-t', mktime(0, 0, 0, $mes, 1, $anho))];
+    }
+    $mp = $mes - 1; $ap = $anho; if ($mp < 1) { $mp = 12; $ap--; }
+    $ini = sprintf('%04d-%02d-%02d', $ap, $mp, diaInicioEnMes($mp, $ap, $diaInicio));
+    $siguiente = sprintf('%04d-%02d-%02d', $anho, $mes, diaInicioEnMes($mes, $anho, $diaInicio));
     return [$ini, date('Y-m-d', strtotime($siguiente . ' -1 day'))];
 }

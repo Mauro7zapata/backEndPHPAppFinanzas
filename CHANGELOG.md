@@ -1,5 +1,12 @@
 # Changelog · Backend
 
+## 2026-10-04 (6) · Inicio: muestra el último presupuesto creado
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Cobros atrasados | `libInversiones.php`, `Inicio/Dashboard.php` | El aviso dice «3 cuotas atrasadas en 2 inversiones» (se agrega `inversionesAtrasadas` al resumen) | Decía «3 cobros atrasados» pero la lista muestra inversiones y una tenía 2 cuotas atrasadas | Solo cambia el texto; las cifras no |
+| Mes por defecto del Inicio | `Inicio/Dashboard.php` | Sin `mes`/`anho`, si existe un presupuesto más reciente que el mes financiero actual (p. ej. octubre creado el 4 de octubre con "el mes empieza el día 25", cuando aún es septiembre) se muestra ese. Un mes que aún no empieza cuenta 0 días transcurridos | El Inicio mostraba septiembre aunque ya estaba creado octubre | Con el mes pedido explícitamente (flechas) no cambia nada |
+
 ## 2026-10-04 (5) · Cuentas de usuario (multiusuario)
 
 **Requiere ejecutar `sql/005_multiusuario.sql` (copia de seguridad antes) y actualizar `config.local.php` (ver `config.example.php`). Sube TODO el backend: casi todos los archivos cambiaron.**
@@ -69,3 +76,5 @@
 | Categorías | `Presupuesto/CategoriaGastos.php` | Se elimina el `echo` de depuración; no permite borrar categorías con gastos | Gastos huérfanos desaparecían de listados pero seguían en totales | Mensaje nuevo al intentar borrar una categoría en uso |
 | Estados | `Estados.php` | No permite borrar estados en uso (gastos/inversiones/pagos) | Mismo problema de huérfanos | Mensaje nuevo |
 | Base de datos | `sql/001_integridad_presupuesto.sql` | UNIQUE (Anho, Mes); FK gastos→categoría/estado; triggers con `COALESCE` y recálculo del gasto anterior al mover un movimiento; recálculo de `valorGastosMovimiento` | Datos descuadrados (gastos 120 y 187) y NULL al borrar el último movimiento | Requiere ejecutar la migración (con respaldo previo) |
+
+- **Mes financiero nombrado por el mes que termina** (`lib.php` `mesFinanciero`/`periodoFinanciero`): con `dia_inicio_mes` = 28, el 28 de septiembre empieza «octubre» (28/sep–27/oct). Día 1 = mes calendario. Afecta Inicio/Dashboard (mes por defecto, días restantes).

@@ -21,8 +21,23 @@ $hoyTxt = date('Y-m-d');
 $hoy = new DateTime($hoyTxt);
 $diaInicioMes = parametroApp('dia_inicio_mes');
 [$mesActualFin, $anhoActualFin] = mesFinanciero($hoyTxt, $diaInicioMes);
-$mes = appfinanzas_entero($_GET['mes'] ?? null) ?? $mesActualFin;
-$anho = appfinanzas_entero($_GET['anho'] ?? null) ?? $anhoActualFin;
+$mes = appfinanzas_entero($_GET['mes'] ?? null);
+$anho = appfinanzas_entero($_GET['anho'] ?? null);
+if ($mes === null || $anho === null) {
+    // Sin mes pedido: el mes financiero actual, salvo que ya exista un presupuesto más reciente (p. ej. el de octubre
+    // creado por adelantado): se muestra el último presupuesto creado.
+    $mes = $mesActualFin;
+    $anho = $anhoActualFin;
+    $q = $mysql->prepare("SELECT Mes, Anho FROM presupuestos WHERE IdUsuario = ? ORDER BY Anho DESC, Mes DESC LIMIT 1");
+    $q->bind_param('i', $uid);
+    $q->execute();
+    $ultimo = $q->get_result()->fetch_assoc();
+    $q->close();
+    if ($ultimo && ((int)$ultimo['Anho'] * 12 + (int)$ultimo['Mes']) > ($anhoActualFin * 12 + $mesActualFin)) {
+        $mes = (int)$ultimo['Mes'];
+        $anho = (int)$ultimo['Anho'];
+    }
+}
 if ($mes < 1 || $mes > 12 || $anho < 2000 || $anho > 2100) {
     echo json_encode(['error' => 'Mes o año no válido']);
     exit;
@@ -30,7 +45,9 @@ if ($mes < 1 || $mes > 12 || $anho < 2000 || $anho > 2100) {
 $esMesActual = ($mes === $mesActualFin && $anho === $anhoActualFin);
 [$periodoIni, $periodoFin] = periodoFinanciero($mes, $anho, $diaInicioMes);
 $diasMes = (int)(new DateTime($periodoIni))->diff(new DateTime($periodoFin))->days + 1;
-$diaActual = $esMesActual ? (int)(new DateTime($periodoIni))->diff($hoy)->days + 1 : $diasMes;
+// Mes ya cerrado: completo. Mes que aún no empieza (presupuesto creado por adelantado): 0 días transcurridos.
+$mesFuturo = (new DateTime($periodoIni)) > $hoy;
+$diaActual = $esMesActual ? (int)(new DateTime($periodoIni))->diff($hoy)->days + 1 : ($mesFuturo ? 0 : $diasMes);
 
 function dias_hasta($fecha) {
     global $hoy;
@@ -188,7 +205,7 @@ if ($idPresupuesto) {
 // ------------------------------------------------------------------ inversiones
 $inv = invCalcularResumen($hoyTxt)['kpi'];
 $inversiones = ['activas' => $inv['activas'], 'capitalActivo' => $inv['capitalActivo'], 'interesMes' => $inv['interesMes'],
-    'porCobrar30' => $inv['porCobrar30'], 'vencido' => $inv['vencido'], 'cuotasVencidas' => $inv['cuotasVencidas'],
+    'porCobrar30' => $inv['porCobrar30'], 'vencido' => $inv['vencido'], 'cuotasVencidas' => $inv['cuotasVencidas'], 'inversionesAtrasadas' => $inv['inversionesAtrasadas'],
     'rendimientoMensual' => $inv['rendimientoMensual'], 'necesitanCuota' => $inv['necesitanCuota']];
 
 $stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre
@@ -287,7 +304,8 @@ if ($presupuesto['vencidos'] > 0) {
         'detalle' => 'Págalos o muévelos de fecha para que tu presupuesto siga limpio.', 'tono' => 'alerta', 'accion' => 'ver_agenda', 'boton' => 'Ver pagos'];
 }
 if ($inversiones['cuotasVencidas'] > 0) {
-    $mensajes[] = ['emoji' => '💸', 'titulo' => $inversiones['cuotasVencidas'] . ($inversiones['cuotasVencidas'] == 1 ? ' cobro atrasado' : ' cobros atrasados') . ' por ' . pesos($inversiones['vencido']),
+    $nCuotas = (int)$inversiones['cuotasVencidas']; $nInv = (int)$inversiones['inversionesAtrasadas'];
+    $mensajes[] = ['emoji' => '💸', 'titulo' => $nCuotas . ($nCuotas == 1 ? ' cuota atrasada' : ' cuotas atrasadas') . ($nInv > 0 ? ' en ' . $nInv . ($nInv == 1 ? ' inversión' : ' inversiones') : '') . ' por ' . pesos($inversiones['vencido']),
         'detalle' => 'Es plata tuya trabajando: cóbrala o ajusta la cuota.', 'tono' => 'alerta', 'accion' => 'ver_inversiones', 'boton' => 'Ver cobros'];
 }
 if ($racha >= 2) {

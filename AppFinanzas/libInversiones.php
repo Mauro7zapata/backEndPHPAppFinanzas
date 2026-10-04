@@ -490,7 +490,7 @@ function invCalcularResumen($hoy) {
 
     $kpi = [
         'capitalActivo' => 0.0, 'capitalPrestado' => 0.0, 'rendimientoMensual' => 0.0,
-        'porCobrar30' => 0.0, 'vencido' => 0.0, 'cuotasVencidas' => 0,
+        'porCobrar30' => 0.0, 'vencido' => 0.0, 'cuotasVencidas' => 0, 'inversionesAtrasadas' => 0,
         'interesMes' => 0.0, 'interesAnho' => 0.0, 'interesTotal' => 0.0,
         'activas' => 0, 'liquidadas' => 0, 'perdidas' => 0, 'necesitanCuota' => 0,
     ];
@@ -528,6 +528,7 @@ function invCalcularResumen($hoy) {
             $porTipo[$tipo]['capital'] += $r['saldo'];
         }
 
+        $conAtraso = false;
         foreach ($cuotas as $c) {
             $valor = (float)$c['InteresPagado'] + (float)$c['CapitalPagado'] + (float)$c['DividendoPagado'];
             if ($c['cobrada']) {
@@ -541,10 +542,12 @@ function invCalcularResumen($hoy) {
                     if (isset($meses[$m])) { $meses[$m]['interes'] += $interes; $meses[$m]['capital'] += (float)$c['CapitalPagado']; }
                 }
             } elseif ($estado === 'Desembolsado' && $c['FechaPrevistaPago']) {
-                if ($c['FechaPrevistaPago'] < $hoy) { $kpi['vencido'] += $valor; $kpi['cuotasVencidas']++; }
+                if ($c['FechaPrevistaPago'] < $hoy) { $kpi['vencido'] += $valor; $kpi['cuotasVencidas']++; $conAtraso = true; }
                 if ($c['FechaPrevistaPago'] <= $limite30) $kpi['porCobrar30'] += $valor;
             }
         }
+        // Una inversión con varias cuotas atrasadas cuenta una sola vez aquí (la lista de la app muestra inversiones, no cuotas).
+        if ($conAtraso) $kpi['inversionesAtrasadas']++;
     }
 
     // Orden: activas primero, luego las que más atraso tienen y por nombre.
