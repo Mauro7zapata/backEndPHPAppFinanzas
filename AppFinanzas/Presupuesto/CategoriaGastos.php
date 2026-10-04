@@ -2,6 +2,12 @@
 require_once("../db.php");
 require_once(__DIR__ . '/../lib.php');
 
+// Prioridad válida: 0 = sin prioridad, 1 = alta, 2 = media, 3 = baja.
+function prioridadValida($v) {
+    $n = appfinanzas_entero($v);
+    return ($n !== null && $n >= 0 && $n <= 3) ? $n : 0;
+}
+
 // Consultar Categorías de Gastos
 function consultarCategoriasGastos() {
     global $mysql, $uid;
@@ -19,7 +25,8 @@ function consultarCategoriasGastos() {
                 "idCategoriaGastos" => $row['idCategoriaGastos'],
                 "NombreCategoria" => $row['NombreCategoria'],
                 "ColorCategoria" => $row['ColorCategoria'],
-                "ImagenCategoria" => $row['ImagenCategoria']
+                "ImagenCategoria" => $row['ImagenCategoria'],
+                "Prioridad" => (int)($row['Prioridad'] ?? 0)
             ];
         }
         // Retornar la respuesta como JSON
@@ -52,7 +59,8 @@ function consultarCategoriasGastosId($id) {
                     "idCategoriaGastos" => $row['idCategoriaGastos'],
                     "NombreCategoria" => $row['NombreCategoria'],
                     "ColorCategoria" => $row['ColorCategoria'],
-                    "ImagenCategoria" => $row['ImagenCategoria']
+                    "ImagenCategoria" => $row['ImagenCategoria'],
+                    "Prioridad" => (int)($row['Prioridad'] ?? 0)
                 ];
             }
             // Retornar la respuesta como JSON
@@ -71,10 +79,11 @@ function consultarCategoriasGastosId($id) {
 // Insertar Categorías de Gastos
 function insertarCategoriaGastos($data) {
     global $mysql, $uid;
-    $query = "INSERT INTO categoriagastos (NombreCategoria, ColorCategoria, ImagenCategoria, IdUsuario) VALUES (?, ?, ?, ?)";
+    $prioridad = prioridadValida($data['Prioridad'] ?? 0);
+    $query = "INSERT INTO categoriagastos (NombreCategoria, ColorCategoria, ImagenCategoria, Prioridad, IdUsuario) VALUES (?, ?, ?, ?, ?)";
     $stmt = $mysql->prepare($query);
     if ($stmt) {
-        $stmt->bind_param("sssi", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $uid);
+        $stmt->bind_param("sssii", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $prioridad, $uid);
         if ($stmt->execute()) {
             echo "Categoría de gasto insertada correctamente.";
         } else {
@@ -94,10 +103,14 @@ function editarCategoriaGastos($data) {
         echo "Error al actualizar la categoría de gasto: la categoría no existe.";
         return;
     }
-    $query = "UPDATE categoriagastos SET NombreCategoria = ?, ColorCategoria = ?, ImagenCategoria = ? WHERE idCategoriaGastos = ? AND IdUsuario = ?";
+    // Si no se envía la prioridad se conserva la que ya tenía.
+    $conPrioridad = isset($data['Prioridad']);
+    $prioridad = prioridadValida($data['Prioridad'] ?? 0);
+    $query = "UPDATE categoriagastos SET NombreCategoria = ?, ColorCategoria = ?, ImagenCategoria = ?" . ($conPrioridad ? ", Prioridad = ?" : "") . " WHERE idCategoriaGastos = ? AND IdUsuario = ?";
     $stmt = $mysql->prepare($query);
     if ($stmt) {
-        $stmt->bind_param("sssii", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $data['id'], $uid);
+        if ($conPrioridad) $stmt->bind_param("sssiii", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $prioridad, $data['id'], $uid);
+        else $stmt->bind_param("sssii", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $data['id'], $uid);
         if ($stmt->execute()) {
             echo "Categoría de gasto actualizada correctamente.";
         } else {

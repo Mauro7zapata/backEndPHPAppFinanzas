@@ -84,3 +84,7 @@
 - **Inicio → «Lo que viene»**: los pagos del presupuesto ahora son solo los del mes que estás viendo con las flechas (antes mostraba los de cualquier mes cercano). Deudas, cobros de inversiones y obligaciones siguen apareciendo siempre. (`Inicio/Dashboard.php`)
 
 - **Inicio → «Lo que viene» clasificado** (`InicioUi.kt`, `Dashboard.php`): los pagos y cobros se agrupan por origen (Presupuesto del mes, Cobros de inversiones, Deudas y tarjetas, Obligaciones anuales) y el servidor envía hasta 6 de cada clase.
+
+
+- **Prioridad por categoría + orden y agrupación del presupuesto** (`Categoria.kt`, `CategoriasActivity.kt`, `PresupuestoActivity.kt`; servidor `CategoriaGastos.php`, `sql/007_prioridad_categoria.sql`): cada categoría tiene prioridad (Alta, Media, Baja, Sin prioridad). En Presupuesto hay «Orden» (estado, prioridad, fecha límite, mayor valor) y «Agrupar por categoría» con subtotales; la elección se recuerda. Requiere ejecutar la migración 007 antes de subir CategoriaGastos.php.
+- **Inicio**: el saludo incluye el nombre del usuario («Buenas tardes, Mauro 👋»). (`InicioUi.kt`)
