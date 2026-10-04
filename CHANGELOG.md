@@ -1,5 +1,26 @@
 # Changelog · Backend
 
+## 2026-10-03 (2) — Deudas, obligaciones anuales y alertas
+**Requiere ejecutar `sql/002_deudas_obligaciones.sql` (idempotente, no toca datos existentes).**
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Esquema | sql/002_deudas_obligaciones.sql | Tablas `deudas`, `movimientos_deuda`, `obligaciones`; columnas `gastos.idDeuda` e `idObligacion` (FK SET NULL) | Registrar tarjetas, préstamo y deudas informales; obligaciones anuales | Solo agrega; sin cambios en datos |
+| Deudas | Deudas/Deudas.php (nuevo) | CRUD, cargos/abonos/intereses manuales, saldo calculado, próximos corte/pago, progreso | Saldo y progreso por deuda | Endpoint nuevo |
+| Abonos automáticos | lib.php, Presupuesto/Movimientos.php | Un movimiento de un gasto vinculado a una deuda crea/actualiza/borra su abono | Pagar desde el presupuesto baja la deuda sin doble registro | Pagos del presupuesto actualizan deudas |
+| Vínculo gasto-deuda | Presupuesto/Gastos.php | Acepta `idDeuda` (0 = sin deuda; si no se envía, no cambia) y devuelve `idDeuda`/`idObligacion` | Clientes viejos siguen funcionando | Campos nuevos en el JSON |
+| Obligaciones | Deudas/Obligaciones.php (nuevo) | CRUD, ahorrado del ciclo, cuota de provisión = (valor − ahorrado) ÷ meses restantes, `pagar` (+1 año) | Renta, SOAT, tecnomecánica, impuestos | Endpoint nuevo |
+| Provisión mensual | Presupuesto/Plantilla.php, lib.php | Al aplicar la plantilla se crea un gasto "Provisión: X" en estado Acumulado por obligación; la plantilla ya arrastra `idDeuda` y no repite provisiones | Que el ahorro anual se planee mes a mes | `provisiones` en la respuesta |
+| Alertas | Deudas/Alertas.php (nuevo) | Pagos por vencer/vencidos, obligaciones próximas y cortes de tarjeta; acciones `pagarGasto` y `pagarObligacion` | Notificaciones del celular | Endpoint nuevo |
+| Zona horaria | db.php | `date_default_timezone_set('America/Bogota')` | Fechas de vencimiento correctas | Cálculos de "hoy" en hora de Colombia |
+
+## 2026-10-03 — Orden, plantilla y vínculo gasto↔movimiento
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Orden por estado | Presupuesto/Gastos.php | Listados por mes/presupuesto ordenados Pendiente→En proceso→Guardado→Acumulado→Pagado→No aplica, luego fecha límite | Ver primero lo urgente | Cambia el orden de la lista |
+| Estado automático | Presupuesto/Movimientos.php | `sincronizarGasto`: ≥95 % del previsto ⇒ Pagado (+FechaPago); >0 ⇒ En proceso; sin movimientos ⇒ Pendiente. No toca Guardado/Acumulado/No aplica | El movimiento debe reflejarse en el gasto | El estado cambia solo al crear/editar/borrar movimientos |
+| Corrección | Presupuesto/Movimientos.php | Un JSON de objeto único se procesa como un movimiento (antes se iteraba por campos) | Bug latente | Ninguno para el cliente actual |
+| Plantilla | Presupuesto/Plantilla.php (nuevo) | GET sugiere gastos frecuentes (últimos 6 presupuestos, aparición ≥50 %, mín. 2); POST los crea como Pendiente sin duplicar | Evitar crear gastos mes a mes | Endpoint nuevo, sin migración SQL |
+
 ## 2026-10-03 · Seguridad y módulo de presupuesto
 
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |

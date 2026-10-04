@@ -1,5 +1,6 @@
 <?php
 require_once("../db.php");
+require_once("../lib.php");
 
 header('Content-Type: application/json');
 
@@ -37,24 +38,44 @@ function procesarMovimiento($data) {
                 if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('sdsssi', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto']);
                 $stmt->execute();
-                echo json_encode(['id' => $mysql->insert_id]);
+                $idNuevo = $mysql->insert_id;
+                sincronizarGasto($data['idGasto']);
+                sincronizarAbonoMovimiento($idNuevo);
+                echo json_encode(['id' => $idNuevo]);
                 break;
 
             case 'actualizar':
                 if ($error = validarMovimiento($data)) { echo json_encode(['error' => $error]); break; }
+                // Gasto anterior: el movimiento podría moverse a otro gasto.
+                $gastoAnterior = null;
+                $q = $mysql->prepare("SELECT idGasto FROM movimientos WHERE idMovimiento = ?");
+                $q->bind_param('i', $data['idMovimiento']);
+                $q->execute();
+                if ($fila = $q->get_result()->fetch_assoc()) $gastoAnterior = $fila['idGasto'];
                 $stmt = $mysql->prepare("UPDATE movimientos SET tipoMovimiento = ?, valorMovimiento = ?, nombreGasto = ?, observacionMovimiento = ?, fechaMovimiento = ?, idGasto = ? WHERE idMovimiento = ?");
                 if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('sdsssii', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto'], $data['idMovimiento']);
                 $stmt->execute();
-                echo json_encode(['updated' => $stmt->affected_rows > 0]);
+                $actualizado = $stmt->affected_rows > 0;
+                sincronizarGasto($data['idGasto']);
+                sincronizarAbonoMovimiento($data['idMovimiento']);
+                if ($gastoAnterior !== null && $gastoAnterior != $data['idGasto']) sincronizarGasto($gastoAnterior);
+                echo json_encode(['updated' => $actualizado]);
                 break;
 
             case 'eliminar':
+                $gastoAnterior = null;
+                $q = $mysql->prepare("SELECT idGasto FROM movimientos WHERE idMovimiento = ?");
+                $q->bind_param('i', $data['idMovimiento']);
+                $q->execute();
+                if ($fila = $q->get_result()->fetch_assoc()) $gastoAnterior = $fila['idGasto'];
                 $stmt = $mysql->prepare("DELETE FROM movimientos WHERE idMovimiento = ?");
                 if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('i', $data['idMovimiento']);
                 $stmt->execute();
-                echo json_encode(['deleted' => $stmt->affected_rows > 0]);
+                $eliminado = $stmt->affected_rows > 0;
+                if ($gastoAnterior !== null) sincronizarGasto($gastoAnterior);
+                echo json_encode(['deleted' => $eliminado]);
                 break;
 
             default:
@@ -166,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     if (strpos($contentType, "application/json") !== false) {
         $input = json_decode(file_get_contents('php://input'), true);
-        if (is_array($input)) {
+        if (is_array($input) && !isset($input['accion'])) {
             foreach ($input as $data) {
                 procesarMovimiento($data);
             }

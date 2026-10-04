@@ -9,6 +9,8 @@
  */
 
 // Nunca mostrar errores de PHP al cliente (rompen el JSON y filtran rutas); se registran en el log.
+// Las fechas (vencimientos, alertas, "hoy") se calculan en hora de Colombia, no en la del servidor.
+date_default_timezone_set('America/Bogota');
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
 

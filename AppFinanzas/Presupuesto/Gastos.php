@@ -1,10 +1,14 @@
 <?php
 require_once("../db.php");
+// Orden de los gastos según su estado: lo que requiere atención primero y lo ya resuelto al final.
+// Pendiente -> En proceso -> Guardado -> Acumulado -> Pagado -> No aplica
+define('ORDEN_ESTADO_SQL', "CASE e.NombreEstado WHEN 'Pendiente' THEN 1 WHEN 'En proceso' THEN 2 WHEN 'Guardado' THEN 3 WHEN 'Acumulado' THEN 4 WHEN 'Pagado' THEN 5 WHEN 'No aplica' THEN 6 ELSE 7 END");
+
 
 // Consultar Gastos
 function consultarGastos() {
     global $mysql;
-    $query = "SELECT idGastos, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, Observaciones, IdEstado, IdCategoria, FechaPago,idPresupuesto,valorGastosMovimiento 
+    $query = "SELECT idGastos, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, Observaciones, IdEstado, IdCategoria, FechaPago,idPresupuesto,valorGastosMovimiento, idDeuda, idObligacion 
             FROM gastos INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos order by c.NombreCategoria,NombreGasto";
     $result = $mysql->query($query);
 
@@ -23,7 +27,9 @@ function consultarGastos() {
                 "IdCategoria" => $row['IdCategoria'],
                 "FechaPago" => $row['FechaPago'],
                 "idPresupuesto" => $row['idPresupuesto'],
-                "valorGastosMovimiento" => $row['valorGastosMovimiento']
+                "valorGastosMovimiento" => $row['valorGastosMovimiento'],
+                "idDeuda" => $row['idDeuda'],
+                "idObligacion" => $row['idObligacion']
             ];
         }
         // Retornar los resultados como JSON
@@ -41,12 +47,12 @@ function consultarGastosPorMesYAnho($mes, $anho) {
 
     // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
-                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento
+                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion
             FROM gastos g INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos
             INNER JOIN estados e ON g.IdEstado = e.idEstado
             INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
             WHERE p.Mes = ? AND p.Anho = ?
-            order by c.NombreCategoria,g.NombreGasto";
+            ORDER BY " . ORDEN_ESTADO_SQL . ", g.FechaLimite IS NULL, g.FechaLimite, c.NombreCategoria, g.NombreGasto";
 
     // Preparar la consulta para evitar inyecciones SQL
     $stmt = $mysql->prepare($query);
@@ -83,7 +89,9 @@ function consultarGastosPorMesYAnho($mes, $anho) {
                 "idPresupuesto" => $row['idPresupuesto'],
                 "NombreEstado" => $row['NombreEstado'],
                 "NombreCategoria" => $row['NombreCategoria'],
-                "valorGastosMovimiento" => $row['valorGastosMovimiento']
+                "valorGastosMovimiento" => $row['valorGastosMovimiento'],
+                "idDeuda" => $row['idDeuda'],
+                "idObligacion" => $row['idObligacion']
             ];
         }
     }
@@ -98,12 +106,12 @@ function consultarGastosPorIdPresupuesto($idPresupuesto) {
 
     // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
-                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento
+                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion
             FROM gastos g INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos
             INNER JOIN estados e ON g.IdEstado = e.idEstado
             INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
             WHERE g.idPresupuesto = ?
-            order by c.NombreCategoria,g.NombreGasto";
+            ORDER BY " . ORDEN_ESTADO_SQL . ", g.FechaLimite IS NULL, g.FechaLimite, c.NombreCategoria, g.NombreGasto";
 
     // Preparar la consulta para evitar inyecciones SQL
     $stmt = $mysql->prepare($query);
@@ -140,7 +148,9 @@ function consultarGastosPorIdPresupuesto($idPresupuesto) {
                 "idPresupuesto" => $row['idPresupuesto'],
                 "NombreEstado" => $row['NombreEstado'],
                 "NombreCategoria" => $row['NombreCategoria'],
-                "valorGastosMovimiento" => $row['valorGastosMovimiento']
+                "valorGastosMovimiento" => $row['valorGastosMovimiento'],
+                "idDeuda" => $row['idDeuda'],
+                "idObligacion" => $row['idObligacion']
             ];
         }
     }
@@ -154,7 +164,7 @@ function consultarGastosID($id) {
     global $mysql;
     $query = "SELECT idGastos, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, 
                         Observaciones, IdEstado, IdCategoria, FechaPago, idPresupuesto,
-                        valorGastosMovimiento
+                        valorGastosMovimiento, idDeuda, idObligacion
               FROM gastos 
               WHERE idGastos = ?";
     $stmt = $mysql->prepare($query);
@@ -180,7 +190,9 @@ function consultarGastosID($id) {
                     "IdCategoria" => $row['IdCategoria'],
                     "FechaPago" => $row['FechaPago'],
                     "idPresupuesto" => $row['idPresupuesto'],
-                    "valorGastosMovimiento" => $row['valorGastosMovimiento']
+                    "valorGastosMovimiento" => $row['valorGastosMovimiento'],
+                    "idDeuda" => $row['idDeuda'],
+                    "idObligacion" => $row['idObligacion']
                 ];
             }
             // Retornar los resultados como JSON
@@ -248,6 +260,20 @@ function validarGasto($data) {
     return null;
 }
 
+// Vincula (o desvincula) un gasto con una deuda. Solo actúa si el cliente envía "idDeuda"
+// (los clientes antiguos no lo envían y el vínculo existente no se toca). 0 o vacío = sin deuda.
+function vincularDeudaGasto($idGasto, $data) {
+    global $mysql;
+    if (!array_key_exists('idDeuda', $data)) return;
+    $idDeuda = appfinanzas_entero($data['idDeuda']);
+    if ($idDeuda !== null && $idDeuda <= 0) $idDeuda = null;
+    $stmt = $mysql->prepare("UPDATE gastos SET idDeuda = ? WHERE idGastos = ?");
+    $stmt->bind_param('ii', $idDeuda, $idGasto);
+    $stmt->execute();
+    require_once(__DIR__ . '/../lib.php');
+    resincronizarAbonosGasto((int)$idGasto);
+}
+
 function insertarGastos($data) {
     global $mysql;
 
@@ -295,6 +321,7 @@ function insertarGastos($data) {
 
     try {
         $stmt->execute();
+        vincularDeudaGasto($mysql->insert_id, $data);
         echo "Gasto insertado correctamente.";
     } catch (mysqli_sql_exception $e) {
         error_log('[AppFinanzas] insertarGastos: ' . $e->getMessage());
@@ -337,6 +364,7 @@ function editarGastos($data) {
 
     try {
         $stmt->execute();
+        vincularDeudaGasto($data['id'], $data);
         echo "Gasto actualizado correctamente.";
     } catch (mysqli_sql_exception $e) {
         error_log('[AppFinanzas] editarGastos: ' . $e->getMessage());
