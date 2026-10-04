@@ -62,6 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     echo json_encode([
         'inversion' => invResumen($inv, $cuotas, $hoy),
         'cuotas' => array_map(function ($c) use ($hoy) { return invCuotaJson($c, $hoy); }, $cuotas),
+        'aportes' => invAportes($id),
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }

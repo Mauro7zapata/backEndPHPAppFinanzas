@@ -102,6 +102,8 @@ function procesarAccion($data) {
                     $stmt = $mysql->prepare("DELETE p FROM PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
                         WHERE p.idInversion = ? AND i.IdUsuario = ?");
                     $stmt->bind_param('ii', $id, $uid); $stmt->execute();
+                    $q = $mysql->prepare("DELETE FROM aportes_inversion WHERE idInversion = ? AND IdUsuario = ?");
+                    $q->bind_param('ii', $id, $uid); $q->execute();
                     $stmt = $mysql->prepare("DELETE FROM Inversiones WHERE idInversion = ? AND IdUsuario = ?");
                     $stmt->bind_param('ii', $id, $uid); $stmt->execute();
                     $mysql->commit();

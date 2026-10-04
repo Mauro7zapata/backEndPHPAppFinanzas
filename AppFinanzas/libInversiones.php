@@ -86,6 +86,21 @@ function invCuotas($idInversion) {
     return $filas;
 }
 
+// Aportes de capital de una inversión (más recientes primero) y su total. Solo si la inversión es del usuario autenticado.
+function invAportes($idInversion) {
+    global $mysql, $uid;
+    $q = $mysql->prepare("SELECT idAporte, Fecha, Valor, Observaciones FROM aportes_inversion WHERE idInversion = ? AND IdUsuario = ? ORDER BY Fecha DESC, idAporte DESC");
+    $q->bind_param('ii', $idInversion, $uid);
+    $q->execute();
+    $filas = $q->get_result()->fetch_all(MYSQLI_ASSOC);
+    $total = 0.0; $lista = [];
+    foreach ($filas as $f) {
+        $total += (float)$f['Valor'];
+        $lista[] = ['idAporte' => (int)$f['idAporte'], 'fecha' => $f['Fecha'], 'valor' => (float)$f['Valor'], 'observaciones' => $f['Observaciones']];
+    }
+    return ['aportes' => $lista, 'total' => $total];
+}
+
 // Capital que falta por recuperar según lo ya cobrado.
 function invSaldoCobrado($inversion, $cuotas) {
     $cobrado = 0.0;

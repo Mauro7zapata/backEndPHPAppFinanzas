@@ -78,3 +78,5 @@
 | Base de datos | `sql/001_integridad_presupuesto.sql` | UNIQUE (Anho, Mes); FK gastos→categoría/estado; triggers con `COALESCE` y recálculo del gasto anterior al mover un movimiento; recálculo de `valorGastosMovimiento` | Datos descuadrados (gastos 120 y 187) y NULL al borrar el último movimiento | Requiere ejecutar la migración (con respaldo previo) |
 
 - **Mes financiero nombrado por el mes que termina** (`lib.php` `mesFinanciero`/`periodoFinanciero`): con `dia_inicio_mes` = 28, el 28 de septiembre empieza «octubre» (28/sep–27/oct). Día 1 = mes calendario. Afecta Inicio/Dashboard (mes por defecto, días restantes).
+
+- **Inversiones: agregar capital** (`sql/006_aportes_inversion.sql`, `Inversiones/Aportes.php`, `libInversiones.php` `invAportes`, `Cuotas.php` devuelve `aportes`, `inversion.php` borra aportes al eliminar): tabla de aportes (fecha, valor, observación); cada aporte suma al capital de la inversión y al editar/eliminar se ajusta la diferencia. Requiere ejecutar la migración 006.
