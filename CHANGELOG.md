@@ -1,25 +1,24 @@
 # Changelog · Backend
 
-## 2026-10-03 (2) — Deudas, obligaciones anuales y alertas
-**Requiere ejecutar `sql/002_deudas_obligaciones.sql` (idempotente, no toca datos existentes).**
-| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
-|---|---|---|---|---|
-| Esquema | sql/002_deudas_obligaciones.sql | Tablas `deudas`, `movimientos_deuda`, `obligaciones`; columnas `gastos.idDeuda` e `idObligacion` (FK SET NULL) | Registrar tarjetas, préstamo y deudas informales; obligaciones anuales | Solo agrega; sin cambios en datos |
-| Deudas | Deudas/Deudas.php (nuevo) | CRUD, cargos/abonos/intereses manuales, saldo calculado, próximos corte/pago, progreso | Saldo y progreso por deuda | Endpoint nuevo |
-| Abonos automáticos | lib.php, Presupuesto/Movimientos.php | Un movimiento de un gasto vinculado a una deuda crea/actualiza/borra su abono | Pagar desde el presupuesto baja la deuda sin doble registro | Pagos del presupuesto actualizan deudas |
-| Vínculo gasto-deuda | Presupuesto/Gastos.php | Acepta `idDeuda` (0 = sin deuda; si no se envía, no cambia) y devuelve `idDeuda`/`idObligacion` | Clientes viejos siguen funcionando | Campos nuevos en el JSON |
-| Obligaciones | Deudas/Obligaciones.php (nuevo) | CRUD, ahorrado del ciclo, cuota de provisión = (valor − ahorrado) ÷ meses restantes, `pagar` (+1 año) | Renta, SOAT, tecnomecánica, impuestos | Endpoint nuevo |
-| Provisión mensual | Presupuesto/Plantilla.php, lib.php | Al aplicar la plantilla se crea un gasto "Provisión: X" en estado Acumulado por obligación; la plantilla ya arrastra `idDeuda` y no repite provisiones | Que el ahorro anual se planee mes a mes | `provisiones` en la respuesta |
-| Alertas | Deudas/Alertas.php (nuevo) | Pagos por vencer/vencidos, obligaciones próximas y cortes de tarjeta; acciones `pagarGasto` y `pagarObligacion` | Notificaciones del celular | Endpoint nuevo |
-| Zona horaria | db.php | `date_default_timezone_set('America/Bogota')` | Fechas de vencimiento correctas | Cálculos de "hoy" en hora de Colombia |
+## 2026-10-04 (2) · Resumen para la pantalla de inicio
 
-## 2026-10-03 — Orden, plantilla y vínculo gasto↔movimiento
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|
-| Orden por estado | Presupuesto/Gastos.php | Listados por mes/presupuesto ordenados Pendiente→En proceso→Guardado→Acumulado→Pagado→No aplica, luego fecha límite | Ver primero lo urgente | Cambia el orden de la lista |
-| Estado automático | Presupuesto/Movimientos.php | `sincronizarGasto`: ≥95 % del previsto ⇒ Pagado (+FechaPago); >0 ⇒ En proceso; sin movimientos ⇒ Pendiente. No toca Guardado/Acumulado/No aplica | El movimiento debe reflejarse en el gasto | El estado cambia solo al crear/editar/borrar movimientos |
-| Corrección | Presupuesto/Movimientos.php | Un JSON de objeto único se procesa como un movimiento (antes se iteraba por campos) | Bug latente | Ninguno para el cliente actual |
-| Plantilla | Presupuesto/Plantilla.php (nuevo) | GET sugiere gastos frecuentes (últimos 6 presupuestos, aparición ≥50 %, mín. 2); POST los crea como Pendiente sin duplicar | Evitar crear gastos mes a mes | Endpoint nuevo, sin migración SQL |
+| Dashboard de inicio | `Inicio/Dashboard.php` (nuevo) | GET `?mes&anho` (por defecto el mes actual en Bogotá): presupuesto (total, gastado, por pagar, restante, gasto diario disponible), top categorías, tendencia 6 meses, deudas, obligaciones, inversiones, agenda de pagos y cobros, hábito de registro (racha y puntaje) y mensajes de ánimo/alerta generados solo con datos reales | Una sola llamada para mostrar "cómo estoy" al abrir la app | Solo lectura; endpoint nuevo |
+| Cálculo de inversiones reutilizable | `libInversiones.php`, `Inversiones/Resumen.php` | El cálculo del resumen pasó a `invCalcularResumen()`; `Resumen.php` solo lo invoca | Reutilizarlo en el dashboard sin duplicar | Misma respuesta que antes |
+
+## 2026-10-04 · Inversiones: resumen, plan de cobros y alertas
+
+**Requiere ejecutar `sql/003_inversiones.sql` en phpMyAdmin (copia de seguridad antes).**
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Limpieza de datos | `sql/003_inversiones.sql` | Fechas `0000-00-00` → NULL (cuotas sin cobrar, inversiones sin fecha final); 7 cuotas con estado de *Gastos* pasan a *Pagos > Pendiente*; índice `(IdEstado, FechaPrevistaPago)` | Fechas inválidas rompían lecturas y cálculos | No borra registros; idempotente |
+| Lógica de inversiones | `libInversiones.php` (nuevo) | Cuotas por tipo (amortiza, interés fijo, indefinido, ganancia fija, cobranza), saldo, propuesta de cuota, generación del plan, cobro y liquidación automática | Un solo lugar para las reglas | Sin impacto en lo existente |
+| Resumen | `Inversiones/Resumen.php` (nuevo) | Lista con avance, próxima cuota y atrasos + estadísticas (capital activo, intereses del mes/año, por cobrar a 30 días, vencido, cobros por mes, capital por tipo) | Pantalla principal de inversiones | Solo lectura |
+| Cuotas | `Inversiones/Cuotas.php` (nuevo) | `generar` (con `simular`), `crear`, `actualizar`, `cobrar`, `deshacer`, `eliminar`; GET con `propuesta=anterior\|recalculada` | Crear todas las cuotas pendientes y agregar una nueva basada en la anterior o recalculada | Endpoint nuevo |
+| CRUD inversión | `Inversiones/inversion.php` | Corregido el `echo "va a crear"` que corrompía la respuesta JSON; validación completa (tipo, estado, fechas, rangos); campos que no aplican se guardan 0/NULL; `eliminar` borra también las cuotas en una transacción; devuelve fechas nulas como `null` | La respuesta de *crear* no era JSON válido; sin validaciones | Mismo contrato para las pantallas antiguas |
+| Alertas | `Deudas/Alertas.php` | Nuevo tipo `cobro` (cuotas por cobrar de inversiones activas, hasta 25) y acción `cobrarCuota` | Avisos de cobro en la barra de notificaciones | La app debe actualizarse para mostrarlos |
 
 ## 2026-10-03 · Seguridad y módulo de presupuesto
 

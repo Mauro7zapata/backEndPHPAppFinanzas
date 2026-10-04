@@ -1,6 +1,7 @@
 <?php
 require_once("../db.php");
 require_once("../lib.php");
+require_once("../libInversiones.php");
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -11,6 +12,7 @@ header('Content-Type: application/json; charset=utf-8');
 //           anuales próximas a vencer y cortes de tarjeta próximos.
 //   POST Alertas.php {accion:'pagarGasto', idGasto}        -> registra un movimiento por lo que falta del gasto
 //   POST Alertas.php {accion:'pagarObligacion', idObligacion} -> cierra el ciclo (vencimiento +1 año)
+//   POST Alertas.php {accion:'cobrarCuota', idPlan}           -> marca como cobrada una cuota de una inversión (tipo 'cobro')
 //
 // Una alerta de pago desaparece sola cuando el gasto pasa a Pagado (o la obligación avanza de ciclo):
 // la app mantiene la notificación fija hasta entonces.
@@ -43,6 +45,33 @@ function alertas($dias, $diasObligaciones) {
             'vencida' => $d < 0,
             'valor' => $falta,
             'esDeuda' => $g['idDeuda'] !== null,
+            'persistente' => true,
+        ];
+    }
+
+    // Cobros de inversiones: cuotas por cobrar que vencen en los próximos $dias o vencieron hace menos de 60 días.
+    $stmt = $mysql->prepare("SELECT p.idPlan, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre
+        FROM PlanPagos p
+        INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+        INNER JOIN estados ei ON ei.idEstado = i.idEstado AND ei.NombreEstado = 'Desembolsado'
+        LEFT JOIN estados ep ON ep.idEstado = p.IdEstado
+        WHERE (ep.NombreEstado IS NULL OR ep.NombreEstado <> 'Cobrado')
+          AND p.FechaPrevistaPago IS NOT NULL AND p.FechaPrevistaPago <= ? AND p.FechaPrevistaPago >= ?
+        ORDER BY p.FechaPrevistaPago LIMIT 25");
+    $stmt->bind_param('ss', $hasta, $desde);
+    $stmt->execute();
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $c) {
+        $d = (int)$hoy->diff(new DateTime($c['FechaPrevistaPago']))->format('%r%a');
+        $salida[] = [
+            'clave' => 'cobro-' . $c['idPlan'],
+            'tipo' => 'cobro',
+            'id' => (int)$c['idPlan'],
+            'titulo' => trim($c['Nombre']) . ' · cuota ' . $c['NroCuota'],
+            'fecha' => $c['FechaPrevistaPago'],
+            'diasRestantes' => $d,
+            'vencida' => $d < 0,
+            'valor' => (float)$c['InteresPagado'] + (float)$c['CapitalPagado'] + (float)$c['DividendoPagado'],
+            'esDeuda' => false,
             'persistente' => true,
         ];
     }
@@ -97,6 +126,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($id === null) { echo json_encode(['error' => 'Identificador no válido']); break; }
                 $valor = registrarPagoGasto($id);
                 echo json_encode($valor === null ? ['error' => 'El gasto no existe'] : ['pagado' => $valor]);
+                break;
+            case 'cobrarCuota':
+                $id = appfinanzas_entero($d['idPlan'] ?? null);
+                if ($id === null) { echo json_encode(['error' => 'Identificador no válido']); break; }
+                $r = invCobrarCuota($id);
+                echo json_encode($r === null ? ['error' => 'La cuota no existe'] : $r);
                 break;
             case 'pagarObligacion':
                 $id = appfinanzas_entero($d['idObligacion'] ?? null);
