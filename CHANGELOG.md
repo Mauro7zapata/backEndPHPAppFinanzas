@@ -80,3 +80,7 @@
 - **Mes financiero nombrado por el mes que termina** (`lib.php` `mesFinanciero`/`periodoFinanciero`): con `dia_inicio_mes` = 28, el 28 de septiembre empieza «octubre» (28/sep–27/oct). Día 1 = mes calendario. Afecta Inicio/Dashboard (mes por defecto, días restantes).
 
 - **Inversiones: agregar capital** (`sql/006_aportes_inversion.sql`, `Inversiones/Aportes.php`, `libInversiones.php` `invAportes`, `Cuotas.php` devuelve `aportes`, `inversion.php` borra aportes al eliminar): tabla de aportes (fecha, valor, observación); cada aporte suma al capital de la inversión y al editar/eliminar se ajusta la diferencia. Requiere ejecutar la migración 006.
+
+- **Inicio → «Lo que viene»**: los pagos del presupuesto ahora son solo los del mes que estás viendo con las flechas (antes mostraba los de cualquier mes cercano). Deudas, cobros de inversiones y obligaciones siguen apareciendo siempre. (`Inicio/Dashboard.php`)
+
+- **Inicio → «Lo que viene» clasificado** (`InicioUi.kt`, `Dashboard.php`): los pagos y cobros se agrupan por origen (Presupuesto del mes, Cobros de inversiones, Deudas y tarjetas, Obligaciones anuales) y el servidor envía hasta 6 de cada clase.

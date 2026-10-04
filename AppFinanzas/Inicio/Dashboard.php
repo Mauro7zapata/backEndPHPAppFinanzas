@@ -226,13 +226,13 @@ foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $c) {
         'valor' => (float)$c['InteresPagado'] + (float)$c['CapitalPagado'] + (float)$c['DividendoPagado'], 'entra' => true];
 }
 
-// Pagos del presupuesto pendientes (vencidos hace menos de 60 días o dentro de 30 días).
+// Pagos pendientes del presupuesto que se está viendo (solo de ese mes; deudas, cobros y obligaciones no dependen del mes).
 $stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento, g.FechaLimite, pr.Mes AS mesP, pr.Anho AS anhoP
     FROM gastos g INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto AND pr.IdUsuario = ?
     INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = pr.IdUsuario
-    WHERE e.NombreEstado IN ('Pendiente','En proceso') AND g.FechaLimite IS NOT NULL AND g.FechaLimite <= ? AND g.FechaLimite >= ?
-    ORDER BY g.FechaLimite LIMIT 12");
-$stmt->bind_param('iss', $uid, $hasta30, $desde60);
+    WHERE e.NombreEstado IN ('Pendiente','En proceso') AND g.FechaLimite IS NOT NULL AND pr.Mes = ? AND pr.Anho = ?
+    ORDER BY g.FechaLimite LIMIT 30");
+$stmt->bind_param('iii', $uid, $mes, $anho);
 $stmt->execute();
 foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $g) {
     $agenda[] = ['tipo' => 'gasto', 'id' => (int)$g['idGastos'], 'mes' => (int)$g['mesP'], 'anho' => (int)$g['anhoP'], 'titulo' => $g['NombreGasto'], 'fecha' => $g['FechaLimite'],
@@ -240,7 +240,12 @@ foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $g) {
 }
 usort($agenda, function ($a, $b) { return strcmp($a['fecha'], $b['fecha']) ?: strcmp($a['titulo'], $b['titulo']); });
 $agendaTotal = count($agenda);
-$agenda = array_slice($agenda, 0, 10);
+// Hasta 6 por clasificación (presupuesto, cobros, deudas, obligaciones) para que ninguna tape a las demás.
+$porTipo = [];
+$agenda = array_values(array_filter($agenda, function ($i) use (&$porTipo) {
+    $porTipo[$i['tipo']] = ($porTipo[$i['tipo']] ?? 0) + 1;
+    return $porTipo[$i['tipo']] <= 6;
+}));
 
 // ------------------------------------------------------------------ hábito de registro
 // Movimientos del usuario: movimientos -> gastos -> presupuestos (IdUsuario).
