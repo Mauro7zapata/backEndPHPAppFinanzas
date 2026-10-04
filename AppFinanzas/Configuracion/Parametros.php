@@ -24,10 +24,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (!$guardados) { echo json_encode(['error' => 'No se recibió ningún parámetro válido'], JSON_UNESCAPED_UNICODE); exit; }
     try {
-        $stmt = $mysql->prepare("INSERT INTO configuracion (Clave, Valor) VALUES (?, ?) ON DUPLICATE KEY UPDATE Valor = VALUES(Valor)");
+        // PK (IdUsuario, Clave): cada usuario guarda sus propios parámetros.
+        $stmt = $mysql->prepare("INSERT INTO configuracion (IdUsuario, Clave, Valor) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE Valor = VALUES(Valor)");
         foreach ($guardados as $clave => $n) {
             $txt = (string)$n;
-            $stmt->bind_param('ss', $clave, $txt);
+            $stmt->bind_param('iss', $uid, $clave, $txt);
             $stmt->execute();
         }
     } catch (mysqli_sql_exception $e) {

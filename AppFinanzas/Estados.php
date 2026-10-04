@@ -1,16 +1,20 @@
 <?php
 require_once("db.php");
+require_once(__DIR__ . '/lib.php');
 
 // Consultar Estados
 function consultarEstados() {
-    global $mysql;
-    $query = "SELECT idEstado, TipoEstado, NombreEstado, ColorEstado FROM estados";
-    $result = $mysql->query($query);
+    global $mysql, $uid;
+    $query = "SELECT idEstado, TipoEstado, NombreEstado, ColorEstado FROM estados WHERE IdUsuario = ?";
+    $stmt = $mysql->prepare($query);
+    $stmt->bind_param("i", $uid);
+    $stmt->execute();
+    $result = $stmt->get_result();
 
     $response = [];
 
     if ($result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
+        while ($row = appfinanzas_fila_texto($result->fetch_assoc())) {
             $response[] = [
                 "idEstado" => $row['idEstado'],
                 "TipoEstado" => $row['TipoEstado'],
@@ -30,14 +34,14 @@ function consultarEstados() {
 
 // Consultar Estados
 function consultarEstadosId($id) {
-    global $mysql;
+    global $mysql, $uid;
     $query = "SELECT idEstado, TipoEstado, NombreEstado, ColorEstado 
                 FROM estados 
-                WHERE idEstado= ?";
+                WHERE idEstado= ? AND IdUsuario = ?";
        $stmt = $mysql->prepare($query);
 
     if ($stmt) {
-        $stmt->bind_param("i", $id); // Asegúrate de pasar el ID como un entero
+        $stmt->bind_param("ii", $id, $uid); // Asegúrate de pasar el ID como un entero
 
         $stmt->execute();
         $result = $stmt->get_result();
@@ -68,14 +72,15 @@ function consultarEstadosId($id) {
 
 // Insertar Estado
 function insertarEstado($data) {
-    global $mysql;
-    $query = "INSERT INTO estados (TipoEstado, NombreEstado, ColorEstado) VALUES (?, ?, ?)";
+    global $mysql, $uid;
+    $query = "INSERT INTO estados (TipoEstado, NombreEstado, ColorEstado, IdUsuario) VALUES (?, ?, ?, ?)";
     $stmt = $mysql->prepare($query);
     $stmt->bind_param(
-        "sss", 
+        "sssi", 
         $data['TipoEstado'], 
         $data['NombreEstado'], 
-        $data['ColorEstado']
+        $data['ColorEstado'],
+        $uid
     );
 
     if ($stmt->execute()) {
@@ -87,15 +92,21 @@ function insertarEstado($data) {
 
 // Editar Estado
 function editarEstado($data) {
-    global $mysql;
-    $query = "UPDATE estados SET TipoEstado=?, NombreEstado=?, ColorEstado=? WHERE idEstado=?";
+    global $mysql, $uid;
+    // El estado debe ser del usuario (no se revela si existe para otro usuario).
+    if (!appfinanzas_es_propio('estados', $data['id'] ?? null)) {
+        echo "Error al actualizar el estado: el estado no existe.";
+        return;
+    }
+    $query = "UPDATE estados SET TipoEstado=?, NombreEstado=?, ColorEstado=? WHERE idEstado=? AND IdUsuario = ?";
     $stmt = $mysql->prepare($query);
     $stmt->bind_param(
-        "sssi", 
+        "sssii", 
         $data['TipoEstado'], 
         $data['NombreEstado'], 
         $data['ColorEstado'],
-        $data['id']
+        $data['id'],
+        $uid
     );
 
     if ($stmt->execute()) {
@@ -107,25 +118,31 @@ function editarEstado($data) {
 
 // Eliminar Estado
 function eliminarEstado($id) {
-    global $mysql;
+    global $mysql, $uid;
 
-    // No eliminar estados en uso: gastos, inversiones y pagos dependen de ellos.
+    // El estado debe ser del usuario (no se revela si existe para otro usuario).
+    if (!appfinanzas_es_propio('estados', $id)) {
+        echo "Error al eliminar el estado: el estado no existe.";
+        return;
+    }
+    // No eliminar estados en uso: gastos, inversiones y pagos dependen de ellos (el estado es del usuario, así que solo cuenta lo suyo).
     $stmtUso = $mysql->prepare(
-        "SELECT (SELECT COUNT(*) FROM gastos WHERE IdEstado = ?) +
-                (SELECT COUNT(*) FROM Inversiones WHERE idEstado = ?) +
-                (SELECT COUNT(*) FROM PlanPagos WHERE IdEstado = ?) AS total");
-    $stmtUso->bind_param("iii", $id, $id, $id);
+        "SELECT (SELECT COUNT(*) FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto WHERE g.IdEstado = ? AND p.IdUsuario = ?) +
+                (SELECT COUNT(*) FROM Inversiones WHERE idEstado = ? AND IdUsuario = ?) +
+                (SELECT COUNT(*) FROM PlanPagos pp INNER JOIN Inversiones i ON i.idInversion = pp.idInversion WHERE pp.IdEstado = ? AND i.IdUsuario = ?) AS total");
+    $stmtUso->bind_param("iiiiii", $id, $uid, $id, $uid, $id, $uid);
     $stmtUso->execute();
     $enUso = (int)$stmtUso->get_result()->fetch_assoc()['total'];
     if ($enUso > 0) {
         echo "No se puede eliminar el estado porque está en uso en $enUso registro(s).";
         return;
     }
-    $query = "DELETE FROM estados WHERE idEstado=?";
+    $query = "DELETE FROM estados WHERE idEstado=? AND IdUsuario = ?";
     $stmt = $mysql->prepare($query);
     $stmt->bind_param(
-        "i", 
-        $id
+        "ii", 
+        $id,
+        $uid
     );
 
     if ($stmt->execute()) {

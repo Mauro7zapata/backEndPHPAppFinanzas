@@ -1,5 +1,6 @@
 <?php
 require_once("../db.php");
+require_once(__DIR__ . '/../lib.php');
 // Orden de los gastos según su estado: lo que requiere atención primero y lo ya resuelto al final.
 // Pendiente -> En proceso -> Guardado -> Acumulado -> Pagado -> No aplica
 define('ORDEN_ESTADO_SQL', "CASE e.NombreEstado WHEN 'Pendiente' THEN 1 WHEN 'En proceso' THEN 2 WHEN 'Guardado' THEN 3 WHEN 'Acumulado' THEN 4 WHEN 'Pagado' THEN 5 WHEN 'No aplica' THEN 6 ELSE 7 END");
@@ -7,15 +8,21 @@ define('ORDEN_ESTADO_SQL', "CASE e.NombreEstado WHEN 'Pendiente' THEN 1 WHEN 'En
 
 // Consultar Gastos
 function consultarGastos() {
-    global $mysql;
-    $query = "SELECT idGastos, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, Observaciones, IdEstado, IdCategoria, FechaPago,idPresupuesto,valorGastosMovimiento, idDeuda, idObligacion 
-            FROM gastos INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos order by c.NombreCategoria,NombreGasto";
-    $result = $mysql->query($query);
+    global $mysql, $uid;
+    $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, g.FechaPago, g.idPresupuesto, g.valorGastosMovimiento, g.idDeuda, g.idObligacion
+            FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+            INNER JOIN categoriagastos c ON g.IdCategoria = c.idCategoriaGastos AND c.IdUsuario = p.IdUsuario
+            WHERE p.IdUsuario = ?
+            ORDER BY c.NombreCategoria, g.NombreGasto";
+    $stmt = $mysql->prepare($query);
+    $stmt->bind_param("i", $uid);
+    $stmt->execute();
+    $result = $stmt->get_result();
 
     $response = [];
 
     if ($result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
+        while ($row = appfinanzas_fila_texto($result->fetch_assoc())) {
             $response[] = [
                 "idGastos" => $row['idGastos'],
                 "NombreGasto" => $row['NombreGasto'],
@@ -43,15 +50,15 @@ function consultarGastos() {
 }
 
 function consultarGastosPorMesYAnho($mes, $anho) {
-    global $mysql;
+    global $mysql, $uid;
 
     // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
                     g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion
-            FROM gastos g INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos
-            INNER JOIN estados e ON g.IdEstado = e.idEstado
-            INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
-            WHERE p.Mes = ? AND p.Anho = ?
+            FROM gastos g INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
+            INNER JOIN categoriagastos c ON g.IdCategoria = c.idCategoriaGastos AND c.IdUsuario = p.IdUsuario
+            INNER JOIN estados e ON g.IdEstado = e.idEstado AND e.IdUsuario = p.IdUsuario
+            WHERE p.Mes = ? AND p.Anho = ? AND p.IdUsuario = ?
             ORDER BY " . ORDEN_ESTADO_SQL . ", g.FechaLimite IS NULL, g.FechaLimite, c.NombreCategoria, g.NombreGasto";
 
     // Preparar la consulta para evitar inyecciones SQL
@@ -64,7 +71,7 @@ function consultarGastosPorMesYAnho($mes, $anho) {
     }
 
     // Vincular los parámetros
-    $stmt->bind_param("ii", $mes, $anho);
+    $stmt->bind_param("iii", $mes, $anho, $uid);
 
     // Ejecutar la consulta
     $stmt->execute();
@@ -102,15 +109,15 @@ function consultarGastosPorMesYAnho($mes, $anho) {
 }
 
 function consultarGastosPorIdPresupuesto($idPresupuesto) {
-    global $mysql;
+    global $mysql, $uid;
 
     // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
                     g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion
-            FROM gastos g INNER JOIN categoriagastos c ON  IdCategoria = c.idCategoriaGastos
-            INNER JOIN estados e ON g.IdEstado = e.idEstado
-            INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
-            WHERE g.idPresupuesto = ?
+            FROM gastos g INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
+            INNER JOIN categoriagastos c ON g.IdCategoria = c.idCategoriaGastos AND c.IdUsuario = p.IdUsuario
+            INNER JOIN estados e ON g.IdEstado = e.idEstado AND e.IdUsuario = p.IdUsuario
+            WHERE g.idPresupuesto = ? AND p.IdUsuario = ?
             ORDER BY " . ORDEN_ESTADO_SQL . ", g.FechaLimite IS NULL, g.FechaLimite, c.NombreCategoria, g.NombreGasto";
 
     // Preparar la consulta para evitar inyecciones SQL
@@ -123,7 +130,7 @@ function consultarGastosPorIdPresupuesto($idPresupuesto) {
     }
 
     // Vincular los parámetros
-    $stmt->bind_param("i", $idPresupuesto);
+    $stmt->bind_param("ii", $idPresupuesto, $uid);
 
     // Ejecutar la consulta
     $stmt->execute();
@@ -161,16 +168,16 @@ function consultarGastosPorIdPresupuesto($idPresupuesto) {
 }
 
 function consultarGastosID($id) {
-    global $mysql;
-    $query = "SELECT idGastos, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, 
-                        Observaciones, IdEstado, IdCategoria, FechaPago, idPresupuesto,
-                        valorGastosMovimiento, idDeuda, idObligacion
-              FROM gastos 
-              WHERE idGastos = ?";
+    global $mysql, $uid;
+    $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite,
+                        g.Observaciones, g.IdEstado, g.IdCategoria, g.FechaPago, g.idPresupuesto,
+                        g.valorGastosMovimiento, g.idDeuda, g.idObligacion
+              FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+              WHERE g.idGastos = ? AND p.IdUsuario = ?";
     $stmt = $mysql->prepare($query);
 
     if ($stmt) {
-        $stmt->bind_param("i", $id); // Asegúrate de pasar el ID como un entero
+        $stmt->bind_param("ii", $id, $uid); // Asegúrate de pasar el ID como un entero
 
         $stmt->execute();
         $result = $stmt->get_result();
@@ -209,7 +216,7 @@ function consultarGastosID($id) {
 }
 // Consultar Totales de Gastos por Mes y Año de la tabla presupuestos
 function consultarTotalesGastos($mes, $anho) {
-    global $mysql;
+    global $mysql, $uid;
 
     // Consulta SQL con JOIN entre 'gastos' y 'presupuestos' para filtrar por Mes y Año
     $query = "
@@ -218,14 +225,14 @@ function consultarTotalesGastos($mes, $anho) {
             SUM(g.CostoReal) AS TotalCostoReal
         FROM gastos g
         JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
-        WHERE p.Mes = ? AND p.Anho = ?
+        WHERE p.Mes = ? AND p.Anho = ? AND p.IdUsuario = ?
     ";
 
     // Preparar la consulta para evitar inyecciones SQL
     $stmt = $mysql->prepare($query);
 
     // Vincular parámetros
-    $stmt->bind_param("ii", $mes, $anho);
+    $stmt->bind_param("iii", $mes, $anho, $uid);
 
     // Ejecutar la consulta
     $stmt->execute();
@@ -263,19 +270,34 @@ function validarGasto($data) {
 // Vincula (o desvincula) un gasto con una deuda. Solo actúa si el cliente envía "idDeuda"
 // (los clientes antiguos no lo envían y el vínculo existente no se toca). 0 o vacío = sin deuda.
 function vincularDeudaGasto($idGasto, $data) {
-    global $mysql;
+    global $mysql, $uid;
     if (!array_key_exists('idDeuda', $data)) return;
     $idDeuda = appfinanzas_entero($data['idDeuda']);
     if ($idDeuda !== null && $idDeuda <= 0) $idDeuda = null;
-    $stmt = $mysql->prepare("UPDATE gastos SET idDeuda = ? WHERE idGastos = ?");
-    $stmt->bind_param('ii', $idDeuda, $idGasto);
+    // El gasto y la deuda deben ser del usuario (la validación previa ya lo comprobó; aquí se garantiza en el UPDATE).
+    $stmt = $mysql->prepare("UPDATE gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        SET g.idDeuda = ? WHERE g.idGastos = ? AND p.IdUsuario = ?");
+    $stmt->bind_param('iii', $idDeuda, $idGasto, $uid);
     $stmt->execute();
-    require_once(__DIR__ . '/../lib.php');
     resincronizarAbonosGasto((int)$idGasto);
 }
 
+// Verifica que la categoría, el estado y la deuda (si se envía) del gasto sean del usuario. Devuelve un mensaje de error o null.
+function validarPropiedadGasto($data) {
+    if (!appfinanzas_es_propio('categoriagastos', $data['IdCategoria'] ?? null) || !appfinanzas_es_propio('estados', $data['IdEstado'] ?? null)) {
+        return "la categoría o el estado seleccionado no existe.";
+    }
+    if (array_key_exists('idDeuda', $data)) {
+        $idDeuda = appfinanzas_entero($data['idDeuda']);
+        if ($idDeuda !== null && $idDeuda > 0 && !appfinanzas_es_propio('deudas', $idDeuda)) {
+            return "la deuda seleccionada no existe.";
+        }
+    }
+    return null;
+}
+
 function insertarGastos($data) {
-    global $mysql;
+    global $mysql, $uid;
 
     $errorValidacion = validarGasto($data);
     if ($errorValidacion) {
@@ -289,10 +311,10 @@ function insertarGastos($data) {
     // Consultar idPresupuesto
     $mes = $data['Mes'] ?? null;
     $anio = $data['Anho'] ?? null;
-    $consultaPresupuesto = "SELECT idPresupuesto FROM presupuestos WHERE Mes = ? AND Anho = ? LIMIT 1";
+    $consultaPresupuesto = "SELECT idPresupuesto FROM presupuestos WHERE Mes = ? AND Anho = ? AND IdUsuario = ? LIMIT 1";
     
     $stmt = $mysql->prepare($consultaPresupuesto);
-    $stmt->bind_param("ii", $mes, $anio);
+    $stmt->bind_param("iii", $mes, $anio, $uid);
     $stmt->execute();
     $resultadoPresupuesto = $stmt->get_result();
     
@@ -301,6 +323,12 @@ function insertarGastos($data) {
         $idPresupuesto = $fila['idPresupuesto'];
     } else {
         echo "Error: No se encontró presupuesto para el mes $mes y año $anio.";
+        return;
+    }
+
+    // Categoría, estado y deuda deben ser del usuario.
+    if ($errorPropiedad = validarPropiedadGasto($data)) {
+        echo "Error al insertar el gasto: " . $errorPropiedad;
         return;
     }
 
@@ -337,7 +365,7 @@ function insertarGastos($data) {
 
 // Editar Gasto
 function editarGastos($data) {
-    global $mysql;
+    global $mysql, $uid;
 
     $errorValidacion = validarGasto($data);
     if ($errorValidacion || appfinanzas_entero($data['id'] ?? null) === null) {
@@ -348,15 +376,25 @@ function editarGastos($data) {
     // FechaPago vacía = sin pago: se guarda NULL (antes quedaba '0000-00-00').
     if (!isset($data['FechaPago']) || $data['FechaPago'] === '' || $data['FechaPago'] === '0000-00-00') { $data['FechaPago'] = null; }
 
-    // sentencia de actualización
-    $query = "UPDATE gastos 
-              SET NombreGasto = ?, CostoPrevisto = ?, CostoReal = ?, FechaLimite = ?, Observaciones = ?, 
-                  IdEstado = ?, IdCategoria = ?, FechaPago = ? 
-              WHERE idGastos = ?";
+    // El gasto, la categoría, el estado y la deuda deben ser del usuario.
+    if (!appfinanzas_gasto_es_propio($data['id'])) {
+        echo "Error al actualizar el gasto: el gasto no existe.";
+        return;
+    }
+    if ($errorPropiedad = validarPropiedadGasto($data)) {
+        echo "Error al actualizar el gasto: " . $errorPropiedad;
+        return;
+    }
+
+    // sentencia de actualización (el JOIN con presupuestos garantiza el dueño)
+    $query = "UPDATE gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+              SET g.NombreGasto = ?, g.CostoPrevisto = ?, g.CostoReal = ?, g.FechaLimite = ?, g.Observaciones = ?, 
+                  g.IdEstado = ?, g.IdCategoria = ?, g.FechaPago = ? 
+              WHERE g.idGastos = ? AND p.IdUsuario = ?";
 
     $stmt = $mysql->prepare($query);
     $stmt->bind_param(
-        "sddssiisi", 
+        "sddssiisii", 
         $data['NombreGasto'], 
         $data['CostoPrevisto'], 
         $data['CostoReal'], 
@@ -365,7 +403,8 @@ function editarGastos($data) {
         $data['IdEstado'], 
         $data['IdCategoria'], 
         $data['FechaPago'], 
-        $data['id']
+        $data['id'],
+        $uid
     );
 
     try {
@@ -382,18 +421,20 @@ function editarGastos($data) {
 
 // Eliminar Gasto
 function eliminarGastos($id) {
-    global $mysql;
+    global $mysql, $uid;
 
     $id = appfinanzas_entero($id);
     if ($id === null || $id <= 0) {
         echo "Error: Identificador de gasto no válido.";
         return;
     }
-    $query = "DELETE FROM gastos WHERE idGastos=?";
+    $query = "DELETE g FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+              WHERE g.idGastos = ? AND p.IdUsuario = ?";
     $stmt = $mysql->prepare($query);
     $stmt->bind_param(
-        "i", 
-        $id
+        "ii", 
+        $id,
+        $uid
     );
 
     try {

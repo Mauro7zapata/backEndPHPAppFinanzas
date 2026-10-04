@@ -28,9 +28,9 @@ function claveGasto($nombre, $idCategoria) {
 }
 
 function buscarPresupuesto($mes, $anho) {
-    global $mysql;
-    $stmt = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE Mes = ? AND Anho = ?");
-    $stmt->bind_param('ii', $mes, $anho);
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE Mes = ? AND Anho = ? AND IdUsuario = ?");
+    $stmt->bind_param('iii', $mes, $anho, $uid);
     $stmt->execute();
     $fila = $stmt->get_result()->fetch_assoc();
     return $fila ? (int)$fila['idPresupuesto'] : null;
@@ -38,25 +38,27 @@ function buscarPresupuesto($mes, $anho) {
 
 // Gastos marcados por el usuario: [clave => true]. Vacío si no hay ninguno (o si falta la migración 004).
 function plantillaMarcados() {
-    global $mysql;
+    global $mysql, $uid;
     $m = [];
     try {
-        $res = $mysql->query("SELECT Nombre, IdCategoria FROM plantilla_gastos");
-        foreach ($res->fetch_all(MYSQLI_ASSOC) as $f) $m[claveGasto($f['Nombre'], $f['IdCategoria'])] = true;
+        $stmt = $mysql->prepare("SELECT Nombre, IdCategoria FROM plantilla_gastos WHERE IdUsuario = ?");
+        $stmt->bind_param('i', $uid);
+        $stmt->execute();
+        foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) $m[claveGasto($f['Nombre'], $f['IdCategoria'])] = true;
     } catch (mysqli_sql_exception $e) {
     }
     return $m;
 }
 
 function gastosFrecuentes($mes, $anho) {
-    global $mysql;
+    global $mysql, $uid;
     $indice = $anho * 12 + $mes;
     $marcados = plantillaMarcados();
 
     // Presupuestos anteriores más recientes.
     $limite = $marcados ? 36 : MESES_ANALISIS;
-    $stmt = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE (Anho * 12 + Mes) < ? ORDER BY (Anho * 12 + Mes) DESC LIMIT " . $limite);
-    $stmt->bind_param('i', $indice);
+    $stmt = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE (Anho * 12 + Mes) < ? AND IdUsuario = ? ORDER BY (Anho * 12 + Mes) DESC LIMIT " . $limite);
+    $stmt->bind_param('ii', $indice, $uid);
     $stmt->execute();
     $ids = array_map(function ($r) { return (int)$r['idPresupuesto']; }, $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
     if (count($ids) === 0) return [];
@@ -64,13 +66,17 @@ function gastosFrecuentes($mes, $anho) {
     $umbral = max(MIN_APARICIONES, (int)ceil(count($ids) / 2));
     $lista = implode(',', $ids); // enteros ya validados
 
-    $res = $mysql->query("SELECT g.NombreGasto, g.IdCategoria, c.NombreCategoria, g.CostoPrevisto, g.FechaLimite, g.Observaciones, g.idDeuda, p.Anho, p.Mes
+    // $lista son ids de presupuestos del usuario (ya enteros); el filtro por IdUsuario se repite por seguridad.
+    $stmt = $mysql->prepare("SELECT g.NombreGasto, g.IdCategoria, c.NombreCategoria, g.CostoPrevisto, g.FechaLimite, g.Observaciones, g.idDeuda, p.Anho, p.Mes
         FROM gastos g
-        INNER JOIN estados e ON e.idEstado = g.IdEstado
-        INNER JOIN categoriagastos c ON c.idCategoriaGastos = g.IdCategoria
         INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
-        WHERE g.idPresupuesto IN ($lista) AND e.NombreEstado <> 'No aplica' AND g.idObligacion IS NULL
+        INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = p.IdUsuario
+        INNER JOIN categoriagastos c ON c.idCategoriaGastos = g.IdCategoria AND c.IdUsuario = p.IdUsuario
+        WHERE g.idPresupuesto IN ($lista) AND p.IdUsuario = ? AND e.NombreEstado <> 'No aplica' AND g.idObligacion IS NULL
         ORDER BY (p.Anho * 12 + p.Mes) DESC, g.idGastos DESC");
+    $stmt->bind_param('i', $uid);
+    $stmt->execute();
+    $res = $stmt->get_result();
 
     $grupos = [];
     while ($f = $res->fetch_assoc()) {
@@ -116,7 +122,7 @@ function fechaLimiteDelMes($dia, $mes, $anho) {
 }
 
 function aplicarPlantilla($data) {
-    global $mysql;
+    global $mysql, $uid;
     $mes = appfinanzas_entero($data['mes'] ?? null);
     $anho = appfinanzas_entero($data['anho'] ?? null);
     if ($mes === null || $anho === null || $mes < 1 || $mes > 12 || $anho < 2000 || $anho > 2100) {
@@ -137,7 +143,8 @@ function aplicarPlantilla($data) {
         }));
     }
 
-    $stmt = $mysql->prepare("SELECT idEstado FROM estados WHERE TipoEstado = 'Gastos' AND NombreEstado = 'Pendiente' LIMIT 1");
+    $stmt = $mysql->prepare("SELECT idEstado FROM estados WHERE TipoEstado = 'Gastos' AND NombreEstado = 'Pendiente' AND IdUsuario = ? LIMIT 1");
+    $stmt->bind_param('i', $uid);
     $stmt->execute();
     $est = $stmt->get_result()->fetch_assoc();
     if (!$est) { echo json_encode(['error' => "No existe el estado 'Pendiente'"]); return; }
@@ -145,8 +152,9 @@ function aplicarPlantilla($data) {
 
     // Gastos que ya existen en el presupuesto destino (evita duplicar).
     $existentes = [];
-    $stmt = $mysql->prepare("SELECT NombreGasto, IdCategoria FROM gastos WHERE idPresupuesto = ?");
-    $stmt->bind_param('i', $idPresupuesto);
+    $stmt = $mysql->prepare("SELECT g.NombreGasto, g.IdCategoria FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        WHERE g.idPresupuesto = ? AND p.IdUsuario = ?");
+    $stmt->bind_param('ii', $idPresupuesto, $uid);
     $stmt->execute();
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
         $existentes[claveGasto($f['NombreGasto'], $f['IdCategoria'])] = true;
@@ -187,13 +195,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nombre = trim((string)($input['nombre'] ?? ''));
         $cat = appfinanzas_entero($input['idCategoria'] ?? null);
         if ($nombre === '' || mb_strlen($nombre, 'UTF-8') > 255 || $cat === null) { echo json_encode(['error' => 'Gasto no válido']); exit; }
+        // La categoría debe ser del usuario (no se revela si existe para otro usuario).
+        if (!appfinanzas_es_propio('categoriagastos', $cat)) { echo json_encode(['error' => 'Gasto no válido']); exit; }
         try {
             if (!empty($input['marcado'])) {
-                $stmt = $mysql->prepare("INSERT IGNORE INTO plantilla_gastos (Nombre, IdCategoria) VALUES (?, ?)");
+                $stmt = $mysql->prepare("INSERT IGNORE INTO plantilla_gastos (IdUsuario, Nombre, IdCategoria) VALUES (?, ?, ?)");
             } else {
-                $stmt = $mysql->prepare("DELETE FROM plantilla_gastos WHERE Nombre = ? AND IdCategoria = ?");
+                $stmt = $mysql->prepare("DELETE FROM plantilla_gastos WHERE IdUsuario = ? AND Nombre = ? AND IdCategoria = ?");
             }
-            $stmt->bind_param('si', $nombre, $cat);
+            $stmt->bind_param('isi', $uid, $nombre, $cat);
             $stmt->execute();
             echo json_encode(['marcado' => !empty($input['marcado'])]);
         } catch (mysqli_sql_exception $e) {
@@ -206,8 +216,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 } elseif (isset($_GET['marcados'])) {
     $m = [];
     try {
-        $res = $mysql->query("SELECT Nombre, IdCategoria FROM plantilla_gastos ORDER BY Nombre");
-        foreach ($res->fetch_all(MYSQLI_ASSOC) as $f) $m[] = ['nombre' => $f['Nombre'], 'idCategoria' => (int)$f['IdCategoria']];
+        $stmt = $mysql->prepare("SELECT Nombre, IdCategoria FROM plantilla_gastos WHERE IdUsuario = ? ORDER BY Nombre");
+        $stmt->bind_param('i', $uid);
+        $stmt->execute();
+        foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) $m[] = ['nombre' => $f['Nombre'], 'idCategoria' => (int)$f['IdCategoria']];
     } catch (mysqli_sql_exception $e) {
     }
     echo json_encode($m, JSON_UNESCAPED_UNICODE);

@@ -1,5 +1,20 @@
 # Changelog · Backend
 
+## 2026-10-04 (5) · Cuentas de usuario (multiusuario)
+
+**Requiere ejecutar `sql/005_multiusuario.sql` (copia de seguridad antes) y actualizar `config.local.php` (ver `config.example.php`). Sube TODO el backend: casi todos los archivos cambiaron.**
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Usuarios y sesiones | `sql/005_multiusuario.sql` | Tablas `usuarios`, `sesiones` (tokens solo como hash SHA-256) e `intentos_acceso`; `IdUsuario` en presupuestos, categorías, estados, deudas, obligaciones, inversiones, plantilla y configuración; claves únicas por usuario; todo lo existente pasa al usuario 1 | Base para comercializar: cada persona ve solo sus datos | Idempotente; no borra datos |
+| Registro / login | `Auth/Registro.php`, `Login.php`, `libAuth.php` | Correo + contraseña (`password_hash`), validación de fortaleza, límite de intentos por correo e IP (429), respuesta igual para correo inexistente o clave errónea | Acceso por usuario | Usuario nuevo recibe estados y categorías básicas |
+| Google | `Auth/Google.php`, `libAuth.php` | Verifica el ID token con Google (audiencia, emisor, vigencia, correo verificado); crea o vincula la cuenta | Acceso con Google | Requiere `google_client_ids` en la configuración |
+| Sesión | `Auth/Refresh.php`, `Logout.php`, `Perfil.php`, `db.php` | Token de acceso de 1 h + token de renovación de 90 días que rota en cada uso; `db.php` exige `Authorization: Bearer` y expone `$uid`; cierre de sesión y de todas las sesiones | Seguridad: ya no hay clave compartida en el APK | La API key compartida solo sirve si se configura `api_key_usuario` (transición) |
+| Cuenta | `Auth/CambiarClave.php`, `EliminarCuenta.php` | Cambiar contraseña (cierra otras sesiones) y eliminar cuenta con todos sus datos | Derecho de supresión (Ley 1581) | Irreversible; exige contraseña y escribir ELIMINAR |
+| Cuenta inicial | `Auth/Registro.php`, `config.example.php` | El correo de la migración se reclama con `codigo_cuenta_inicial` o entrando con Google con ese correo | Conservar tus datos actuales | Borrar el código al reclamarla |
+| Aislamiento | `lib.php`, `libInversiones.php`, `Presupuesto/*`, `Inversiones/*`, `Deudas/*`, `Inicio/Dashboard.php`, `Estados.php`, `Configuracion/Parametros.php` | ~130 consultas filtran por `IdUsuario`; los hijos verifican su padre; los ids foráneos del cliente se validan; ids ajenos responden como inexistentes | Ningún usuario puede leer ni modificar datos de otro | Probado con dos usuarios en todos los endpoints; respuestas del usuario 1 idénticas a las anteriores |
+| Errores de id ajeno | `Cuotas.php`, `Deudas.php`, `Obligaciones.php` | `observar`, `actualizar` y `movimiento` con id inexistente ahora devuelven error (antes `updated:true`) | Coherencia | Solo con ids inexistentes o ajenos |
+
 ## 2026-10-04 (4) · Observaciones, plan que se recalcula y parámetros
 
 **Requiere ejecutar `sql/004_observaciones_configuracion.sql` en phpMyAdmin (copia de seguridad antes).**
@@ -10,7 +25,7 @@
 | Plan que se recalcula | `libInversiones.php` (`invSincronizarPlan`), `Inversiones/inversion.php` | Si cambia la fecha final de una inversión con plazo, las cuotas pendientes se regeneran hasta la nueva fecha (octubre → diciembre: 7 → 9) y `NroCuotas` se actualiza; si se acorta, sobran y se eliminan solo las pendientes; **las cobradas no se tocan** y las observaciones se conservan; responde `plan {total, agregadas, eliminadas}` | Que el número de cuotas siga la fecha | Solo cuando cambia `FechaFin` (tipos con plazo; no acciones ni ganancia fija) |
 | Recalcular siguientes | `Inversiones/Cuotas.php` | `actualizar` con `recalcularSiguientes: true` corre las cuotas pendientes siguientes mes a mes desde la nueva fecha | Al mover una fecha, las demás la siguen | Opcional; por defecto no cambia nada |
 | Nota en la notificación | `Deudas/Alertas.php`, `lib.php` | `pagarGasto` y `cobrarCuota` aceptan `observaciones` (se guarda en el movimiento / en la cuota) | Escribir una observación al tocar "Ya pagué/Ya cobré" | Opcional |
-| Parámetros | `sql/004_...sql`, `lib.php`, `Configuracion/Parametros.php` (nuevo) | Tabla `configuracion` (clave/valor) con días de aviso, día de inicio del mes financiero, % de alerta del presupuesto; GET/POST validados por rangos | Configurar la app sin tocar código | Sin la migración se usan los valores por defecto |
+| Parámetros | `sql/004_...sql`, `lib.php`, `Configuracion/Parametros.php` (nuevo) | Tabla `configuracion` (clave/valor) con días de aviso, día de inicio del mes financiero (1 a 31; en meses cortos empieza el último día), % de alerta del presupuesto; GET/POST validados por rangos | Configurar la app sin tocar código | Sin la migración se usan los valores por defecto |
 | Mes financiero | `Inicio/Dashboard.php`, `lib.php` | El mes actual, los días restantes y el gasto diario usan el día de inicio configurado (inicio el 25: del 25 oct al 24 nov es "octubre"); aviso al alcanzar el % del presupuesto configurado; la agenda trae `idInversion` y `mes/anho` | Meses que empiezan el día de pago | Con inicio = 1 todo queda igual que antes |
 | Plantilla con check | `Presupuesto/Plantilla.php`, `sql/004_...sql` | Tabla `plantilla_gastos` (nombre + categoría) y acciones `marcar` / `?marcados=1`; si hay gastos marcados la plantilla son exactamente esos (valor y día de su aparición más reciente), si no hay ninguno se mantiene la detección automática | Elegir con un check qué gastos se repiten cada mes | Compatible: sin marcas todo funciona como antes |
 | Avisos | `Deudas/Alertas.php` | Los días de anticipación por defecto salen de los parámetros | Configurable desde la app | Igual que antes si no se cambian |

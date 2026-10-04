@@ -19,9 +19,25 @@ function validarObligacion($d) {
     return null;
 }
 
+// La categoría debe ser del usuario autenticado (no se revela si existe para otro usuario).
+function categoriaDelUsuario($idCategoria) {
+    global $mysql, $uid;
+    $id = appfinanzas_entero($idCategoria);
+    if ($id === null) return false;
+    $q = $mysql->prepare("SELECT 1 FROM categoriagastos WHERE idCategoriaGastos = ? AND IdUsuario = ?");
+    $q->bind_param('ii', $id, $uid);
+    $q->execute();
+    return (bool)$q->get_result()->fetch_row();
+}
+
 function listarObligaciones($mes, $anho) {
-    global $mysql;
-    $res = $mysql->query("SELECT o.*, c.NombreCategoria FROM obligaciones o INNER JOIN categoriagastos c ON c.idCategoriaGastos = o.IdCategoria ORDER BY o.Activa DESC, o.FechaVencimiento");
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT o.*, c.NombreCategoria FROM obligaciones o
+        INNER JOIN categoriagastos c ON c.idCategoriaGastos = o.IdCategoria AND c.IdUsuario = o.IdUsuario
+        WHERE o.IdUsuario = ? ORDER BY o.Activa DESC, o.FechaVencimiento");
+    $stmt->bind_param('i', $uid);
+    $stmt->execute();
+    $res = $stmt->get_result();
     $hoy = new DateTime('today');
     $salida = [];
     foreach ($res->fetch_all(MYSQLI_ASSOC) as $o) {
@@ -46,26 +62,31 @@ function listarObligaciones($mes, $anho) {
 }
 
 function procesarObligacion($d) {
-    global $mysql;
+    global $mysql, $uid;
     $accion = $d['accion'] ?? '';
     try {
         switch ($accion) {
             case 'crear':
             case 'actualizar':
                 if ($e = validarObligacion($d)) { echo json_encode(['error' => $e]); return; }
+                if (!categoriaDelUsuario($d['idCategoria'])) { echo json_encode(['error' => 'La categoría no existe']); return; }
                 $notas = $d['notas'] ?? null;
                 $activa = array_key_exists('activa', $d) ? ($d['activa'] ? 1 : 0) : 1;
                 if ($accion === 'crear') {
                     // El ciclo empieza el mes actual: lo provisionado antes de crear la obligación no se cuenta.
                     $ciclo = date('Y-m-01');
-                    $stmt = $mysql->prepare("INSERT INTO obligaciones (Nombre, IdCategoria, ValorEstimado, FechaVencimiento, CicloInicio, Activa, Notas) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                    $stmt->bind_param('sidssis', $d['nombre'], $d['idCategoria'], $d['valorEstimado'], $d['fechaVencimiento'], $ciclo, $activa, $notas);
+                    $stmt = $mysql->prepare("INSERT INTO obligaciones (Nombre, IdCategoria, ValorEstimado, FechaVencimiento, CicloInicio, Activa, Notas, IdUsuario) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                    $stmt->bind_param('sidssisi', $d['nombre'], $d['idCategoria'], $d['valorEstimado'], $d['fechaVencimiento'], $ciclo, $activa, $notas, $uid);
                     $stmt->execute();
                     echo json_encode(['id' => $mysql->insert_id]);
                 } else {
-                    if (appfinanzas_entero($d['idObligacion'] ?? null) === null) { echo json_encode(['error' => 'Identificador no válido']); return; }
-                    $stmt = $mysql->prepare("UPDATE obligaciones SET Nombre=?, IdCategoria=?, ValorEstimado=?, FechaVencimiento=?, Activa=?, Notas=? WHERE idObligacion=?");
-                    $stmt->bind_param('sidsisi', $d['nombre'], $d['idCategoria'], $d['valorEstimado'], $d['fechaVencimiento'], $activa, $notas, $d['idObligacion']);
+                    $idObl = appfinanzas_entero($d['idObligacion'] ?? null);
+                    if ($idObl === null) { echo json_encode(['error' => 'Identificador no válido']); return; }
+                    $q = $mysql->prepare("SELECT 1 FROM obligaciones WHERE idObligacion = ? AND IdUsuario = ?");
+                    $q->bind_param('ii', $idObl, $uid); $q->execute();
+                    if (!$q->get_result()->fetch_row()) { echo json_encode(['error' => 'La obligación no existe']); return; }
+                    $stmt = $mysql->prepare("UPDATE obligaciones SET Nombre=?, IdCategoria=?, ValorEstimado=?, FechaVencimiento=?, Activa=?, Notas=? WHERE idObligacion=? AND IdUsuario=?");
+                    $stmt->bind_param('sidsisii', $d['nombre'], $d['idCategoria'], $d['valorEstimado'], $d['fechaVencimiento'], $activa, $notas, $idObl, $uid);
                     $stmt->execute();
                     echo json_encode(['updated' => true]);
                 }
@@ -74,8 +95,8 @@ function procesarObligacion($d) {
             case 'eliminar':
                 $id = appfinanzas_entero($d['idObligacion'] ?? null);
                 if ($id === null) { echo json_encode(['error' => 'Identificador no válido']); return; }
-                $stmt = $mysql->prepare("DELETE FROM obligaciones WHERE idObligacion = ?");
-                $stmt->bind_param('i', $id);
+                $stmt = $mysql->prepare("DELETE FROM obligaciones WHERE idObligacion = ? AND IdUsuario = ?");
+                $stmt->bind_param('ii', $id, $uid);
                 $stmt->execute();
                 echo json_encode(['deleted' => $stmt->affected_rows > 0]);
                 break;
@@ -84,8 +105,8 @@ function procesarObligacion($d) {
                 $id = appfinanzas_entero($d['idObligacion'] ?? null);
                 if ($id === null) { echo json_encode(['error' => 'Identificador no válido']); return; }
                 $ciclo = date('Y-m-01', strtotime('first day of next month'));
-                $stmt = $mysql->prepare("UPDATE obligaciones SET FechaVencimiento = DATE_ADD(FechaVencimiento, INTERVAL 1 YEAR), CicloInicio = ? WHERE idObligacion = ?");
-                $stmt->bind_param('si', $ciclo, $id);
+                $stmt = $mysql->prepare("UPDATE obligaciones SET FechaVencimiento = DATE_ADD(FechaVencimiento, INTERVAL 1 YEAR), CicloInicio = ? WHERE idObligacion = ? AND IdUsuario = ?");
+                $stmt->bind_param('sii', $ciclo, $id, $uid);
                 $stmt->execute();
                 echo json_encode(['updated' => $stmt->affected_rows > 0]);
                 break;

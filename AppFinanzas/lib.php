@@ -5,6 +5,55 @@
 // Porcentaje del costo previsto a partir del cual un gasto se considera pagado.
 const UMBRAL_PAGADO = 0.95;
 
+// ---------------------------------------------------------------- Aislamiento por usuario
+// Todas las funciones de este archivo trabajan sobre el usuario autenticado ($uid, definido en db.php).
+
+// true si el registro $id de una tabla raíz pertenece al usuario autenticado.
+// Sirve para validar ids foráneos que llegan del cliente (categoría, estado, presupuesto, deuda, obligación).
+function appfinanzas_es_propio($tabla, $id) {
+    global $mysql, $uid;
+    static $columnas = [
+        'presupuestos' => 'idPresupuesto', 'categoriagastos' => 'idCategoriaGastos', 'estados' => 'idEstado',
+        'deudas' => 'idDeuda', 'obligaciones' => 'idObligacion', 'Inversiones' => 'idInversion',
+    ];
+    if (!isset($columnas[$tabla])) return false;
+    $id = appfinanzas_entero($id);
+    if ($id === null || $id <= 0) return false;
+    $stmt = $mysql->prepare("SELECT 1 FROM " . $tabla . " WHERE " . $columnas[$tabla] . " = ? AND IdUsuario = ? LIMIT 1");
+    $stmt->bind_param('ii', $id, $uid);
+    $stmt->execute();
+    $existe = (bool)$stmt->get_result()->fetch_row();
+    $stmt->close();
+    return $existe;
+}
+
+// Con consultas preparadas mysqli devuelve enteros/decimales nativos; los endpoints antiguos (query()) los devolvían como
+// texto en el JSON. Esta función conserva ese formato exacto de respuesta ("7" y no 7).
+function appfinanzas_fila_texto($fila) {
+    if (!$fila) return $fila;
+    foreach ($fila as $k => $v) $fila[$k] = $v === null ? null : (string)$v;
+    return $fila;
+}
+function appfinanzas_filas_texto($result) {
+    $filas = [];
+    while ($f = appfinanzas_fila_texto($result->fetch_assoc())) $filas[] = $f;
+    return $filas;
+}
+
+// true si el gasto pertenece al usuario autenticado (gastos hereda el dueño de su presupuesto).
+function appfinanzas_gasto_es_propio($idGasto) {
+    global $mysql, $uid;
+    $idGasto = appfinanzas_entero($idGasto);
+    if ($idGasto === null || $idGasto <= 0) return false;
+    $stmt = $mysql->prepare("SELECT 1 FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        WHERE g.idGastos = ? AND p.IdUsuario = ? LIMIT 1");
+    $stmt->bind_param('ii', $idGasto, $uid);
+    $stmt->execute();
+    $existe = (bool)$stmt->get_result()->fetch_row();
+    $stmt->close();
+    return $existe;
+}
+
 // Ajusta el estado del gasto según lo ya abonado mediante movimientos.
 //  - suma >= 95% del costo previsto  -> Pagado (y se registra la fecha de pago)
 //  - suma > 0 y < 95%                -> En proceso
@@ -12,15 +61,17 @@ const UMBRAL_PAGADO = 0.95;
 // Solo toca gastos que están en Pendiente / En proceso / Pagado: los estados
 // Guardado, Acumulado y No aplica los decide el usuario y no se modifican.
 function sincronizarGasto($idGasto) {
-    global $mysql;
+    global $mysql, $uid;
     $idGasto = (int)$idGasto;
     if ($idGasto <= 0) return;
 
     $stmt = $mysql->prepare("SELECT g.CostoPrevisto, g.IdEstado, e.NombreEstado,
             (SELECT COALESCE(SUM(m.valorMovimiento),0) FROM movimientos m WHERE m.idGasto = g.idGastos) AS total,
             (SELECT MAX(m.fechaMovimiento) FROM movimientos m WHERE m.idGasto = g.idGastos) AS ultima
-        FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado WHERE g.idGastos = ?");
-    $stmt->bind_param('i', $idGasto);
+        FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado
+        INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        WHERE g.idGastos = ? AND p.IdUsuario = ?");
+    $stmt->bind_param('ii', $idGasto, $uid);
     $stmt->execute();
     $g = $stmt->get_result()->fetch_assoc();
     if (!$g || !in_array($g['NombreEstado'], ['Pendiente', 'En proceso', 'Pagado'], true)) return;
@@ -52,9 +103,9 @@ function sincronizarGasto($idGasto) {
 
 // id del estado de tipo "Gastos" con ese nombre (o null).
 function estadoGastoPorNombre($nombre) {
-    global $mysql;
-    $stmt = $mysql->prepare("SELECT idEstado FROM estados WHERE TipoEstado = 'Gastos' AND NombreEstado = ? LIMIT 1");
-    $stmt->bind_param('s', $nombre);
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT idEstado FROM estados WHERE TipoEstado = 'Gastos' AND NombreEstado = ? AND IdUsuario = ? LIMIT 1");
+    $stmt->bind_param('si', $nombre, $uid);
     $stmt->execute();
     $fila = $stmt->get_result()->fetch_assoc();
     return $fila ? (int)$fila['idEstado'] : null;
@@ -63,17 +114,23 @@ function estadoGastoPorNombre($nombre) {
 // Mantiene movimientos_deuda alineado con un movimiento del presupuesto:
 // si el gasto está vinculado a una deuda, el movimiento es un abono a esa deuda.
 function sincronizarAbonoMovimiento($idMovimiento) {
-    global $mysql;
+    global $mysql, $uid;
     $idMovimiento = (int)$idMovimiento;
-    $stmt = $mysql->prepare("SELECT m.valorMovimiento, m.tipoMovimiento, m.fechaMovimiento, m.nombreGasto, g.idDeuda
-        FROM movimientos m LEFT JOIN gastos g ON g.idGastos = m.idGasto WHERE m.idMovimiento = ?");
-    $stmt->bind_param('i', $idMovimiento);
+    // El movimiento debe ser del usuario (movimientos -> gastos -> presupuestos) y la deuda también (si no, se trata como sin deuda).
+    $stmt = $mysql->prepare("SELECT m.valorMovimiento, m.tipoMovimiento, m.fechaMovimiento, m.nombreGasto, d.idDeuda
+        FROM movimientos m INNER JOIN gastos g ON g.idGastos = m.idGasto
+        INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        LEFT JOIN deudas d ON d.idDeuda = g.idDeuda AND d.IdUsuario = p.IdUsuario
+        WHERE m.idMovimiento = ? AND p.IdUsuario = ?");
+    $stmt->bind_param('ii', $idMovimiento, $uid);
     $stmt->execute();
     $m = $stmt->get_result()->fetch_assoc();
 
     if (!$m || $m['idDeuda'] === null || $m['tipoMovimiento'] !== 'Gasto' || (float)$m['valorMovimiento'] <= 0) {
-        $del = $mysql->prepare("DELETE FROM movimientos_deuda WHERE idMovimiento = ?");
-        $del->bind_param('i', $idMovimiento);
+        // Solo se borran abonos de deudas del usuario (el movimiento pudo haberse eliminado ya).
+        $del = $mysql->prepare("DELETE md FROM movimientos_deuda md INNER JOIN deudas d ON d.idDeuda = md.idDeuda
+            WHERE md.idMovimiento = ? AND d.IdUsuario = ?");
+        $del->bind_param('ii', $idMovimiento, $uid);
         $del->execute();
         return;
     }
@@ -87,9 +144,10 @@ function sincronizarAbonoMovimiento($idMovimiento) {
 
 // Recalcula los abonos de todos los movimientos de un gasto (p. ej. al vincularlo/desvincularlo de una deuda).
 function resincronizarAbonosGasto($idGasto) {
-    global $mysql;
-    $stmt = $mysql->prepare("SELECT idMovimiento FROM movimientos WHERE idGasto = ?");
-    $stmt->bind_param('i', $idGasto);
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT m.idMovimiento FROM movimientos m INNER JOIN gastos g ON g.idGastos = m.idGasto
+        INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto WHERE m.idGasto = ? AND p.IdUsuario = ?");
+    $stmt->bind_param('ii', $idGasto, $uid);
     $stmt->execute();
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
         sincronizarAbonoMovimiento($f['idMovimiento']);
@@ -98,9 +156,10 @@ function resincronizarAbonosGasto($idGasto) {
 
 // Registra un movimiento por lo que falta de un gasto (acción "Ya pagué"). Devuelve el valor registrado.
 function registrarPagoGasto($idGasto, $observaciones = null) {
-    global $mysql;
-    $stmt = $mysql->prepare("SELECT NombreGasto, CostoPrevisto, valorGastosMovimiento FROM gastos WHERE idGastos = ?");
-    $stmt->bind_param('i', $idGasto);
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento FROM gastos g
+        INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto WHERE g.idGastos = ? AND p.IdUsuario = ?");
+    $stmt->bind_param('ii', $idGasto, $uid);
     $stmt->execute();
     $g = $stmt->get_result()->fetch_assoc();
     if (!$g) return null;
@@ -153,13 +212,13 @@ function cuotaProvision($valorEstimado, $ahorrado, $fechaVencimiento, $mes, $anh
 
 // Valor ahorrado en el ciclo actual: movimientos de los gastos de provisión desde CicloInicio.
 function ahorradoObligacion($idObligacion, $cicloInicio) {
-    global $mysql;
+    global $mysql, $uid;
     $c = new DateTime($cicloInicio);
     $indice = (int)$c->format('Y') * 12 + (int)$c->format('n');
     $stmt = $mysql->prepare("SELECT COALESCE(SUM(g.valorGastosMovimiento), 0) AS t
         FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
-        WHERE g.idObligacion = ? AND (p.Anho * 12 + p.Mes) >= ?");
-    $stmt->bind_param('ii', $idObligacion, $indice);
+        WHERE g.idObligacion = ? AND (p.Anho * 12 + p.Mes) >= ? AND p.IdUsuario = ?");
+    $stmt->bind_param('iii', $idObligacion, $indice, $uid);
     $stmt->execute();
     return (float)$stmt->get_result()->fetch_assoc()['t'];
 }
@@ -167,13 +226,16 @@ function ahorradoObligacion($idObligacion, $cicloInicio) {
 // Crea, en el presupuesto de $mes/$anho, un gasto "Acumulado" de provisión por cada obligación activa
 // que aún no tenga uno. Devuelve ['insertados' => n, 'omitidos' => n].
 function provisionarObligaciones($mes, $anho, $idPresupuesto) {
-    global $mysql;
+    global $mysql, $uid;
+    if (!appfinanzas_es_propio('presupuestos', $idPresupuesto)) return ['insertados' => 0, 'omitidos' => 0];
     $idAcumulado = estadoGastoPorNombre('Acumulado');
     if (!$idAcumulado) return ['insertados' => 0, 'omitidos' => 0];
 
     $insertados = 0; $omitidos = 0;
-    $res = $mysql->query("SELECT * FROM obligaciones WHERE Activa = 1");
-    foreach ($res->fetch_all(MYSQLI_ASSOC) as $o) {
+    $stmtObl = $mysql->prepare("SELECT * FROM obligaciones WHERE Activa = 1 AND IdUsuario = ?");
+    $stmtObl->bind_param('i', $uid);
+    $stmtObl->execute();
+    foreach ($stmtObl->get_result()->fetch_all(MYSQLI_ASSOC) as $o) {
         $v = new DateTime($o['FechaVencimiento']);
         $indiceVenc = (int)$v->format('Y') * 12 + (int)$v->format('n');
         if ($indiceVenc < $anho * 12 + $mes) { $omitidos++; continue; } // ya venció: ver alertas
@@ -204,20 +266,23 @@ function provisionarObligaciones($mes, $anho, $idPresupuesto) {
 const PARAMETROS_APP = [
     'dias_aviso_pagos' => [3, 0, 30],                 // días de anticipación para avisar pagos y cobros
     'dias_aviso_obligaciones' => [30, 0, 120],        // anticipación de las obligaciones anuales (SOAT, impuestos...)
-    'dia_inicio_mes' => [1, 1, 28],                   // día en que empieza el mes financiero (p. ej. 25 = pago de nómina)
+    'dia_inicio_mes' => [1, 1, 31],                   // día en que empieza el mes financiero (p. ej. 25 = pago de nómina)
     'porcentaje_alerta_presupuesto' => [80, 0, 100],  // avisa al llegar a este % del presupuesto; 0 = desactivado
 ];
 
 // Devuelve todos los parámetros como enteros (si la tabla no existe todavía, usa los valores por defecto).
 function parametrosApp() {
-    global $mysql;
+    global $mysql, $uid;
     static $cache = null;
     if ($cache !== null) return $cache;
     $cache = [];
     foreach (PARAMETROS_APP as $k => $r) $cache[$k] = $r[0];
     try {
-        $res = $mysql->query("SELECT Clave, Valor FROM configuracion");
-        foreach ($res->fetch_all(MYSQLI_ASSOC) as $f) {
+        // Cada usuario tiene sus propias filas; si no tiene ninguna se usan los valores por defecto.
+        $stmt = $mysql->prepare("SELECT Clave, Valor FROM configuracion WHERE IdUsuario = ?");
+        $stmt->bind_param('i', $uid);
+        $stmt->execute();
+        foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
             if (isset(PARAMETROS_APP[$f['Clave']]) && is_numeric($f['Valor'])) {
                 $r = PARAMETROS_APP[$f['Clave']];
                 $cache[$f['Clave']] = max($r[1], min($r[2], (int)$f['Valor']));
@@ -233,19 +298,24 @@ function parametroApp($clave) {
     return parametrosApp()[$clave] ?? (PARAMETROS_APP[$clave][0] ?? null);
 }
 
+// Día de inicio ajustado al mes: si el mes es más corto (p. ej. día 31 en febrero) empieza el último día.
+function diaInicioEnMes($mes, $anho, $diaInicio) {
+    return min((int)$diaInicio, (int)date('t', mktime(0, 0, 0, $mes, 1, $anho)));
+}
+
 // Mes financiero que contiene la fecha dada. Se nombra por el mes en que empieza:
 // con inicio el 25, del 25 de octubre al 24 de noviembre es "octubre".
 function mesFinanciero($fechaTxt, $diaInicio) {
     $f = new DateTime($fechaTxt);
     $mes = (int)$f->format('n'); $anho = (int)$f->format('Y');
-    if ((int)$f->format('j') < $diaInicio) { $mes--; if ($mes < 1) { $mes = 12; $anho--; } }
+    if ((int)$f->format('j') < diaInicioEnMes($mes, $anho, $diaInicio)) { $mes--; if ($mes < 1) { $mes = 12; $anho--; } }
     return [$mes, $anho];
 }
 
 // Primer día y último día (Y-m-d) del mes financiero $mes/$anho.
 function periodoFinanciero($mes, $anho, $diaInicio) {
-    $ini = sprintf('%04d-%02d-%02d', $anho, $mes, $diaInicio);
+    $ini = sprintf('%04d-%02d-%02d', $anho, $mes, diaInicioEnMes($mes, $anho, $diaInicio));
     $m2 = $mes + 1; $a2 = $anho; if ($m2 > 12) { $m2 = 1; $a2++; }
-    $fin = date('Y-m-d', strtotime(sprintf('%04d-%02d-%02d', $a2, $m2, $diaInicio) . ' -1 day'));
-    return [$ini, $fin];
+    $siguiente = sprintf('%04d-%02d-%02d', $a2, $m2, diaInicioEnMes($m2, $a2, $diaInicio));
+    return [$ini, date('Y-m-d', strtotime($siguiente . ' -1 day'))];
 }

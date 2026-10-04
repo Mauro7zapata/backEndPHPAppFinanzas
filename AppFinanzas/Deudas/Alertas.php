@@ -19,20 +19,20 @@ header('Content-Type: application/json; charset=utf-8');
 // la app mantiene la notificación fija hasta entonces.
 
 function alertas($dias, $diasObligaciones) {
-    global $mysql;
+    global $mysql, $uid;
     $salida = [];
     $hoy = new DateTime('today');
 
     // Pagos del presupuesto: vencen en los próximos $dias o vencieron hace menos de 60 días.
     $stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento, g.FechaLimite, g.idDeuda, e.NombreEstado, pr.Mes, pr.Anho
-        FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado
-        LEFT JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto
+        FROM gastos g INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto AND pr.IdUsuario = ?
+        INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = pr.IdUsuario
         WHERE e.NombreEstado IN ('Pendiente','En proceso') AND g.FechaLimite IS NOT NULL
           AND g.FechaLimite <= ? AND g.FechaLimite >= ?
         ORDER BY g.FechaLimite");
     $hasta = date('Y-m-d', strtotime("+$dias days"));
     $desde = date('Y-m-d', strtotime('-60 days'));
-    $stmt->bind_param('ss', $hasta, $desde);
+    $stmt->bind_param('iss', $uid, $hasta, $desde);
     $stmt->execute();
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $g) {
         $falta = round((float)$g['CostoPrevisto'] - (float)$g['valorGastosMovimiento'], 2);
@@ -56,13 +56,13 @@ function alertas($dias, $diasObligaciones) {
     // Cobros de inversiones: cuotas por cobrar que vencen en los próximos $dias o vencieron hace menos de 60 días.
     $stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre
         FROM PlanPagos p
-        INNER JOIN Inversiones i ON i.idInversion = p.idInversion
-        INNER JOIN estados ei ON ei.idEstado = i.idEstado AND ei.NombreEstado = 'Desembolsado'
-        LEFT JOIN estados ep ON ep.idEstado = p.IdEstado
+        INNER JOIN Inversiones i ON i.idInversion = p.idInversion AND i.IdUsuario = ?
+        INNER JOIN estados ei ON ei.idEstado = i.idEstado AND ei.IdUsuario = i.IdUsuario AND ei.NombreEstado = 'Desembolsado'
+        LEFT JOIN estados ep ON ep.idEstado = p.IdEstado AND ep.IdUsuario = i.IdUsuario
         WHERE (ep.NombreEstado IS NULL OR ep.NombreEstado <> 'Cobrado')
           AND p.FechaPrevistaPago IS NOT NULL AND p.FechaPrevistaPago <= ? AND p.FechaPrevistaPago >= ?
         ORDER BY p.FechaPrevistaPago LIMIT 25");
-    $stmt->bind_param('ss', $hasta, $desde);
+    $stmt->bind_param('iss', $uid, $hasta, $desde);
     $stmt->execute();
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $c) {
         $d = (int)$hoy->diff(new DateTime($c['FechaPrevistaPago']))->format('%r%a');
@@ -83,9 +83,9 @@ function alertas($dias, $diasObligaciones) {
 
     // Obligaciones anuales por vencer.
     $stmt = $mysql->prepare("SELECT idObligacion, Nombre, ValorEstimado, FechaVencimiento, CicloInicio FROM obligaciones
-        WHERE Activa = 1 AND FechaVencimiento <= ? ORDER BY FechaVencimiento");
+        WHERE IdUsuario = ? AND Activa = 1 AND FechaVencimiento <= ? ORDER BY FechaVencimiento");
     $hastaObl = date('Y-m-d', strtotime("+$diasObligaciones days"));
-    $stmt->bind_param('s', $hastaObl);
+    $stmt->bind_param('is', $uid, $hastaObl);
     $stmt->execute();
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $o) {
         $d = (int)$hoy->diff(new DateTime($o['FechaVencimiento']))->format('%r%a');
@@ -105,8 +105,10 @@ function alertas($dias, $diasObligaciones) {
     }
 
     // Corte de tarjeta en los próximos 3 días (informativa, se puede descartar).
-    $res = $mysql->query("SELECT idDeuda, Nombre, DiaCorte FROM deudas WHERE Activa = 1 AND Tipo = 'Tarjeta' AND DiaCorte IS NOT NULL");
-    foreach ($res->fetch_all(MYSQLI_ASSOC) as $t) {
+    $stmt = $mysql->prepare("SELECT idDeuda, Nombre, DiaCorte FROM deudas WHERE IdUsuario = ? AND Activa = 1 AND Tipo = 'Tarjeta' AND DiaCorte IS NOT NULL");
+    $stmt->bind_param('i', $uid);
+    $stmt->execute();
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $t) {
         $f = proximaFechaDia($t['DiaCorte']);
         $d = (int)$hoy->diff(new DateTime($f))->format('%r%a');
         if ($d <= 3) {
@@ -142,8 +144,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $id = appfinanzas_entero($d['idObligacion'] ?? null);
                 if ($id === null) { echo json_encode(['error' => 'Identificador no válido']); break; }
                 $ciclo = date('Y-m-01', strtotime('first day of next month'));
-                $stmt = $mysql->prepare("UPDATE obligaciones SET FechaVencimiento = DATE_ADD(FechaVencimiento, INTERVAL 1 YEAR), CicloInicio = ? WHERE idObligacion = ?");
-                $stmt->bind_param('si', $ciclo, $id);
+                $stmt = $mysql->prepare("UPDATE obligaciones SET FechaVencimiento = DATE_ADD(FechaVencimiento, INTERVAL 1 YEAR), CicloInicio = ? WHERE idObligacion = ? AND IdUsuario = ?");
+                $stmt->bind_param('sii', $ciclo, $id, $uid);
                 $stmt->execute();
                 echo json_encode(['updated' => $stmt->affected_rows > 0]);
                 break;

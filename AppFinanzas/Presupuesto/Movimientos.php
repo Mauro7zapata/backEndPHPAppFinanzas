@@ -25,8 +25,12 @@ function validarMovimiento($data) {
     return null;
 }
 
+// Condición de pertenencia: movimientos -> gastos -> presupuestos.IdUsuario (los movimientos no tienen dueño propio).
+const SQL_MOVIMIENTO_PROPIO = "FROM movimientos m INNER JOIN gastos g ON g.idGastos = m.idGasto
+                INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto";
+
 function procesarMovimiento($data) {
-    global $mysql;
+    global $mysql, $uid;
 
     $accion = isset($data['accion']) ? $data['accion'] : '';
 
@@ -34,6 +38,8 @@ function procesarMovimiento($data) {
         switch ($accion) {
             case 'crear':
                 if ($error = validarMovimiento($data)) { echo json_encode(['error' => $error]); break; }
+                // El gasto debe ser del usuario (no se revela si existe para otro usuario).
+                if (!appfinanzas_gasto_es_propio($data['idGasto'])) { echo json_encode(['error' => 'El gasto asociado no existe']); break; }
                 $stmt = $mysql->prepare("INSERT INTO movimientos (tipoMovimiento, valorMovimiento, nombreGasto, observacionMovimiento, fechaMovimiento, idGasto) VALUES (?, ?, ?, ?, ?, ?)");
                 if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('sdsssi', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto']);
@@ -46,12 +52,18 @@ function procesarMovimiento($data) {
 
             case 'actualizar':
                 if ($error = validarMovimiento($data)) { echo json_encode(['error' => $error]); break; }
-                // Gasto anterior: el movimiento podría moverse a otro gasto.
+                // Gasto anterior: el movimiento podría moverse a otro gasto. Debe ser un movimiento del usuario.
                 $gastoAnterior = null;
-                $q = $mysql->prepare("SELECT idGasto FROM movimientos WHERE idMovimiento = ?");
-                $q->bind_param('i', $data['idMovimiento']);
+                $q = $mysql->prepare("SELECT m.idGasto " . SQL_MOVIMIENTO_PROPIO . " WHERE m.idMovimiento = ? AND p.IdUsuario = ?");
+                $q->bind_param('ii', $data['idMovimiento'], $uid);
                 $q->execute();
                 if ($fila = $q->get_result()->fetch_assoc()) $gastoAnterior = $fila['idGasto'];
+                // Movimiento ajeno o inexistente: misma respuesta que un id que no existe.
+                if ($gastoAnterior === null) { echo json_encode(['updated' => false]); break; }
+                // El gasto destino también debe ser del usuario.
+                if (!appfinanzas_gasto_es_propio($data['idGasto'])) { echo json_encode(['error' => 'El gasto asociado no existe']); break; }
+                // Los triggers de movimientos actualizan gastos, así que MySQL no permite usar gastos (JOIN/subconsulta) en este
+                // mismo UPDATE: la propiedad del movimiento ya quedó verificada arriba con el SELECT por usuario.
                 $stmt = $mysql->prepare("UPDATE movimientos SET tipoMovimiento = ?, valorMovimiento = ?, nombreGasto = ?, observacionMovimiento = ?, fechaMovimiento = ?, idGasto = ? WHERE idMovimiento = ?");
                 if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('sdsssii', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto'], $data['idMovimiento']);
@@ -65,10 +77,13 @@ function procesarMovimiento($data) {
 
             case 'eliminar':
                 $gastoAnterior = null;
-                $q = $mysql->prepare("SELECT idGasto FROM movimientos WHERE idMovimiento = ?");
-                $q->bind_param('i', $data['idMovimiento']);
+                $q = $mysql->prepare("SELECT m.idGasto " . SQL_MOVIMIENTO_PROPIO . " WHERE m.idMovimiento = ? AND p.IdUsuario = ?");
+                $q->bind_param('ii', $data['idMovimiento'], $uid);
                 $q->execute();
                 if ($fila = $q->get_result()->fetch_assoc()) $gastoAnterior = $fila['idGasto'];
+                // Movimiento ajeno o inexistente: misma respuesta que un id que no existe.
+                if ($gastoAnterior === null) { echo json_encode(['deleted' => false]); break; }
+                // (Ver nota en 'actualizar': el trigger impide usar gastos en el DELETE; la propiedad ya se verificó arriba.)
                 $stmt = $mysql->prepare("DELETE FROM movimientos WHERE idMovimiento = ?");
                 if (!$stmt) throw new Exception($mysql->error);
                 $stmt->bind_param('i', $data['idMovimiento']);
@@ -92,13 +107,16 @@ function procesarMovimiento($data) {
 }
 
 function consultarMovimientos() {
-    global $mysql;
-    $query = "SELECT * FROM movimientos";
-    $result = $mysql->query($query);
+    global $mysql, $uid;
+    $query = "SELECT m.* " . SQL_MOVIMIENTO_PROPIO . " WHERE p.IdUsuario = ?";
+    $stmt = $mysql->prepare($query);
+    $stmt->bind_param("i", $uid);
+    $stmt->execute();
+    $result = $stmt->get_result();
 
     if ($result) {
         $response = [];
-        while ($row = $result->fetch_assoc()) {
+        while ($row = appfinanzas_fila_texto($result->fetch_assoc())) {
             $response[] = [
                 "idMovimiento" => $row['idMovimiento'],
                 "tipoMovimiento" => $row['tipoMovimiento'],
@@ -116,12 +134,12 @@ function consultarMovimientos() {
 }
 
 function consultarMovimientoId($id) {
-    global $mysql;
-    $query = "SELECT m.*,g.idCategoria FROM movimientos m INNER JOIN gastos g ON m.idGasto = g.idGastos WHERE m.idMovimiento = ?";
+    global $mysql, $uid;
+    $query = "SELECT m.*,g.idCategoria " . SQL_MOVIMIENTO_PROPIO . " WHERE m.idMovimiento = ? AND p.IdUsuario = ?";
     $stmt = $mysql->prepare($query);
 
     if ($stmt) {
-        $stmt->bind_param("i", $id);
+        $stmt->bind_param("ii", $id, $uid);
         $stmt->execute();
         $result = $stmt->get_result();
 
@@ -149,13 +167,12 @@ function consultarMovimientoId($id) {
 }
 
 function consultarMovimientosPorPresupuesto($idPresupuesto) {
-    global $mysql;
-    $query = "SELECT m.*,g.idCategoria FROM movimientos m 
-                INNER JOIN gastos g ON m.idGasto = g.idGastos WHERE g.idPresupuesto = ?";
+    global $mysql, $uid;
+    $query = "SELECT m.*,g.idCategoria " . SQL_MOVIMIENTO_PROPIO . " WHERE g.idPresupuesto = ? AND p.IdUsuario = ?";
     $stmt = $mysql->prepare($query);
 
     if ($stmt) {
-        $stmt->bind_param("i", $idPresupuesto);
+        $stmt->bind_param("ii", $idPresupuesto, $uid);
         $stmt->execute();
         $result = $stmt->get_result();
 

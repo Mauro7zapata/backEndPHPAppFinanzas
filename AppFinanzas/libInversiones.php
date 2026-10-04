@@ -23,13 +23,14 @@ const INV_COBRANZA = 10;
 // Cuántas cuotas se crean como máximo cuando el plan no tiene fin definido.
 const INV_HORIZONTE_CUOTAS = 12;
 
+// Estado del usuario autenticado por tipo y nombre (cada usuario tiene su propio juego de estados).
 function invEstadoId($tipoEstado, $nombre) {
-    global $mysql;
+    global $mysql, $uid;
     static $cache = [];
-    $k = $tipoEstado . '|' . $nombre;
+    $k = $uid . '|' . $tipoEstado . '|' . $nombre;
     if (!array_key_exists($k, $cache)) {
-        $stmt = $mysql->prepare("SELECT idEstado FROM estados WHERE TipoEstado = ? AND NombreEstado = ? LIMIT 1");
-        $stmt->bind_param('ss', $tipoEstado, $nombre);
+        $stmt = $mysql->prepare("SELECT idEstado FROM estados WHERE IdUsuario = ? AND TipoEstado = ? AND NombreEstado = ? LIMIT 1");
+        $stmt->bind_param('iss', $uid, $tipoEstado, $nombre);
         $stmt->execute();
         $f = $stmt->get_result()->fetch_assoc();
         $cache[$k] = $f ? (int)$f['idEstado'] : null;
@@ -53,25 +54,28 @@ function invSumarMeses($fecha, $meses, $diaAncla = null) {
     return sprintf('%04d-%02d-%02d', $anho, $mes, min($dia, $ultimo));
 }
 
+// Inversión del usuario autenticado (null si no existe o es de otro usuario).
 function invCargar($idInversion) {
-    global $mysql;
+    global $mysql, $uid;
     $stmt = $mysql->prepare("SELECT i.*, t.Nombre AS NombreTipo, e.NombreEstado
         FROM Inversiones i
         LEFT JOIN TablaTipoInversion t ON t.idTipo = i.IdTipo
-        LEFT JOIN estados e ON e.idEstado = i.idEstado
-        WHERE i.idInversion = ?");
-    $stmt->bind_param('i', $idInversion);
+        LEFT JOIN estados e ON e.idEstado = i.idEstado AND e.IdUsuario = i.IdUsuario
+        WHERE i.idInversion = ? AND i.IdUsuario = ?");
+    $stmt->bind_param('ii', $idInversion, $uid);
     $stmt->execute();
     return $stmt->get_result()->fetch_assoc() ?: null;
 }
 
 // Cuotas de una inversión, ordenadas por número. 'cobrada' indica si ya se cobró.
+// Solo devuelve cuotas si la inversión es del usuario autenticado.
 function invCuotas($idInversion) {
-    global $mysql;
+    global $mysql, $uid;
     $stmt = $mysql->prepare("SELECT p.*, e.NombreEstado FROM PlanPagos p
-        LEFT JOIN estados e ON e.idEstado = p.IdEstado
-        WHERE p.idInversion = ? ORDER BY p.NroCuota, p.idPlan");
-    $stmt->bind_param('i', $idInversion);
+        INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+        LEFT JOIN estados e ON e.idEstado = p.IdEstado AND e.IdUsuario = i.IdUsuario
+        WHERE p.idInversion = ? AND i.IdUsuario = ? ORDER BY p.NroCuota, p.idPlan");
+    $stmt->bind_param('ii', $idInversion, $uid);
     $stmt->execute();
     $filas = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     foreach ($filas as &$f) {
@@ -193,7 +197,7 @@ function invProponerCuota($inv, $cuotas, $modo) {
 // Genera (o simula) todas las cuotas que faltan hasta que la inversión se pague.
 // Devuelve [ok, cuotas => [...], mensaje?]. Si $guardar es true las inserta como Pendiente.
 function invGenerarCuotas($idInversion, $guardar, $conTransaccion = true) {
-    global $mysql;
+    global $mysql, $uid;
     $inv = invCargar($idInversion);
     if (!$inv) return ['ok' => false, 'mensaje' => 'La inversión no existe'];
     if ($inv['NombreEstado'] !== 'Desembolsado') return ['ok' => false, 'mensaje' => 'Solo se generan cuotas para inversiones en estado Desembolsado'];
@@ -223,10 +227,11 @@ function invGenerarCuotas($idInversion, $guardar, $conTransaccion = true) {
         $pendiente = invEstadoId('Pagos', 'Pendiente');
         if ($conTransaccion) $mysql->begin_transaction();
         try {
+            // INSERT ... SELECT: solo inserta si la inversión pertenece al usuario autenticado.
             $stmt = $mysql->prepare("INSERT INTO PlanPagos (idInversion, NroCuota, FechaPrevistaPago, FechaRealPago, InteresPagado, CapitalPagado, DividendoPagado, IdEstado)
-                VALUES (?, ?, ?, NULL, ?, ?, ?, ?)");
+                SELECT i.idInversion, ?, ?, NULL, ?, ?, ?, ? FROM Inversiones i WHERE i.idInversion = ? AND i.IdUsuario = ?");
             foreach ($nuevas as $c) {
-                $stmt->bind_param('iisdddi', $idInversion, $c['nroCuota'], $c['fechaPrevista'], $c['interes'], $c['capital'], $c['dividendo'], $pendiente);
+                $stmt->bind_param('isdddiii', $c['nroCuota'], $c['fechaPrevista'], $c['interes'], $c['capital'], $c['dividendo'], $pendiente, $idInversion, $uid);
                 $stmt->execute();
             }
             if ($conTransaccion) $mysql->commit();
@@ -246,26 +251,30 @@ function invObservacion($v) {
 }
 
 // Guarda la observación de una cuota. Si ya tenía una distinta, la nueva se anexa para no perder el historial.
+// Solo actúa sobre cuotas de inversiones del usuario autenticado.
 function invGuardarObservacion($idPlan, $texto, $anexar = true) {
-    global $mysql;
+    global $mysql, $uid;
     if ($anexar) {
-        $q = $mysql->prepare("SELECT Observaciones FROM PlanPagos WHERE idPlan = ?");
-        $q->bind_param('i', $idPlan); $q->execute();
+        $q = $mysql->prepare("SELECT p.Observaciones FROM PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+            WHERE p.idPlan = ? AND i.IdUsuario = ?");
+        $q->bind_param('ii', $idPlan, $uid); $q->execute();
         $fila = $q->get_result()->fetch_assoc();
         $previa = trim((string)($fila['Observaciones'] ?? ''));
         if ($previa !== '' && $previa !== $texto && strpos($previa, $texto) === false) $texto = mb_substr($previa . ' · ' . $texto, 0, 500, 'UTF-8');
     }
-    $stmt = $mysql->prepare("UPDATE PlanPagos SET Observaciones = ? WHERE idPlan = ?");
-    $stmt->bind_param('si', $texto, $idPlan);
+    $stmt = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+        SET p.Observaciones = ? WHERE p.idPlan = ? AND i.IdUsuario = ?");
+    $stmt->bind_param('sii', $texto, $idPlan, $uid);
     $stmt->execute();
 }
 
 // Marca una cuota como cobrada. Ajusta importes si se envían. Liquida la inversión si ya no queda nada por cobrar.
 // Devuelve null si la cuota no existe; si no, ['cobrada' => true, 'liquidada' => bool].
 function invCobrarCuota($idPlan, $fecha = null, $interes = null, $capital = null, $dividendo = null, $observaciones = null) {
-    global $mysql;
-    $stmt = $mysql->prepare("SELECT idPlan, idInversion, InteresPagado, CapitalPagado, DividendoPagado FROM PlanPagos WHERE idPlan = ?");
-    $stmt->bind_param('i', $idPlan);
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.InteresPagado, p.CapitalPagado, p.DividendoPagado FROM PlanPagos p
+        INNER JOIN Inversiones i ON i.idInversion = p.idInversion WHERE p.idPlan = ? AND i.IdUsuario = ?");
+    $stmt->bind_param('ii', $idPlan, $uid);
     $stmt->execute();
     $p = $stmt->get_result()->fetch_assoc();
     if (!$p) return null;
@@ -276,8 +285,9 @@ function invCobrarCuota($idPlan, $fecha = null, $interes = null, $capital = null
     $dividendo = $dividendo === null ? (float)$p['DividendoPagado'] : (float)$dividendo;
     $cobrado = invEstadoId('Pagos', 'Cobrado');
 
-    $stmt = $mysql->prepare("UPDATE PlanPagos SET IdEstado = ?, FechaRealPago = ?, InteresPagado = ?, CapitalPagado = ?, DividendoPagado = ? WHERE idPlan = ?");
-    $stmt->bind_param('isdddi', $cobrado, $fecha, $interes, $capital, $dividendo, $idPlan);
+    $stmt = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+        SET p.IdEstado = ?, p.FechaRealPago = ?, p.InteresPagado = ?, p.CapitalPagado = ?, p.DividendoPagado = ? WHERE p.idPlan = ? AND i.IdUsuario = ?");
+    $stmt->bind_param('isdddii', $cobrado, $fecha, $interes, $capital, $dividendo, $idPlan, $uid);
     $stmt->execute();
     $obs = invObservacion($observaciones);
     if ($obs !== null) invGuardarObservacion($idPlan, $obs);
@@ -291,7 +301,7 @@ function invCobrarCuota($idPlan, $fecha = null, $interes = null, $capital = null
 //  - Las observaciones de las pendientes se conservan por número de cuota.
 // Devuelve ['total' => cuotas del plan, 'agregadas' => n, 'eliminadas' => n] o null si no aplica.
 function invSincronizarPlan($idInversion) {
-    global $mysql;
+    global $mysql, $uid;
     $inv = invCargar($idInversion);
     if (!$inv || $inv['NombreEstado'] !== 'Desembolsado') return null;
     $tipo = (int)$inv['IdTipo'];
@@ -304,22 +314,24 @@ function invSincronizarPlan($idInversion) {
 
     $mysql->begin_transaction();
     try {
-        $stmt = $mysql->prepare("DELETE FROM PlanPagos WHERE idInversion = ? AND IdEstado <> ?");
+        $stmt = $mysql->prepare("DELETE p FROM PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+            WHERE p.idInversion = ? AND p.IdEstado <> ? AND i.IdUsuario = ?");
         $cobrado = invEstadoId('Pagos', 'Cobrado');
-        $stmt->bind_param('ii', $idInversion, $cobrado);
+        $stmt->bind_param('iii', $idInversion, $cobrado, $uid);
         $stmt->execute();
 
         $r = invGenerarCuotas($idInversion, true, false);
         $nuevas = $r['ok'] ? count($r['cuotas']) : 0;
 
         if ($obs) {
-            $up = $mysql->prepare("UPDATE PlanPagos SET Observaciones = ? WHERE idInversion = ? AND NroCuota = ? AND IdEstado <> ?");
-            foreach ($obs as $nro => $texto) { $up->bind_param('siii', $texto, $idInversion, $nro, $cobrado); $up->execute(); }
+            $up = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+                SET p.Observaciones = ? WHERE p.idInversion = ? AND p.NroCuota = ? AND p.IdEstado <> ? AND i.IdUsuario = ?");
+            foreach ($obs as $nro => $texto) { $up->bind_param('siiii', $texto, $idInversion, $nro, $cobrado, $uid); $up->execute(); }
         }
         // El número de cuotas del plan se mantiene al día con el plazo.
         $total = count(invCuotas($idInversion));
-        $up = $mysql->prepare("UPDATE Inversiones SET NroCuotas = ? WHERE idInversion = ?");
-        $up->bind_param('ii', $total, $idInversion);
+        $up = $mysql->prepare("UPDATE Inversiones SET NroCuotas = ? WHERE idInversion = ? AND IdUsuario = ?");
+        $up->bind_param('iii', $total, $idInversion, $uid);
         $up->execute();
         $mysql->commit();
     } catch (Throwable $e) {
@@ -333,7 +345,7 @@ function invSincronizarPlan($idInversion) {
 // Si ya se recuperó todo el capital y no quedan cuotas por cobrar, la inversión pasa a Liquidado.
 // Con $permitirReabrir, si estaba Liquidado y de nuevo hay capital por recuperar (se deshizo un cobro), vuelve a Desembolsado.
 function invRevisarLiquidacion($idInversion, $permitirReabrir = false) {
-    global $mysql;
+    global $mysql, $uid;
     $inv = invCargar($idInversion);
     if (!$inv) return false;
     $cuotas = invCuotas($idInversion);
@@ -344,15 +356,15 @@ function invRevisarLiquidacion($idInversion, $permitirReabrir = false) {
     $liquidado = invEstadoId('Inversion', 'Liquidado');
     $desembolsado = invEstadoId('Inversion', 'Desembolsado');
     if ($inv['NombreEstado'] === 'Desembolsado' && $saldo <= 0.5 && $pendientes === 0 && (int)$inv['IdTipo'] !== INV_ACCIONES && $liquidado) {
-        $stmt = $mysql->prepare("UPDATE Inversiones SET idEstado = ? WHERE idInversion = ?");
-        $stmt->bind_param('ii', $liquidado, $idInversion);
+        $stmt = $mysql->prepare("UPDATE Inversiones SET idEstado = ? WHERE idInversion = ? AND IdUsuario = ?");
+        $stmt->bind_param('iii', $liquidado, $idInversion, $uid);
         $stmt->execute();
         return true;
     }
     // Solo se reabre cuando el usuario deshace un cobro: hay inversiones liquidadas con cuotas viejas sin marcar y no deben reabrirse solas.
     if ($permitirReabrir && $inv['NombreEstado'] === 'Liquidado' && $saldo > 0.5 && $desembolsado) {
-        $stmt = $mysql->prepare("UPDATE Inversiones SET idEstado = ? WHERE idInversion = ?");
-        $stmt->bind_param('ii', $desembolsado, $idInversion);
+        $stmt = $mysql->prepare("UPDATE Inversiones SET idEstado = ? WHERE idInversion = ? AND IdUsuario = ?");
+        $stmt->bind_param('iii', $desembolsado, $idInversion, $uid);
         $stmt->execute();
     }
     return false;
@@ -448,20 +460,28 @@ function invCuotaJson($c, $hoy) {
 // Resumen general del módulo: KPIs, cobros por mes, capital por tipo/estado y cada inversión con su avance.
 // Lo usan Inversiones/Resumen.php y el dashboard de inicio.
 function invCalcularResumen($hoy) {
-    global $mysql;
+    global $mysql, $uid;
     $mesActual = substr($hoy, 0, 7);
     $anhoActual = substr($hoy, 0, 4);
 
-    $res = $mysql->query("SELECT i.*, t.Nombre AS NombreTipo, e.NombreEstado
+    $stmt = $mysql->prepare("SELECT i.*, t.Nombre AS NombreTipo, e.NombreEstado
         FROM Inversiones i
         LEFT JOIN TablaTipoInversion t ON t.idTipo = i.IdTipo
-        LEFT JOIN estados e ON e.idEstado = i.idEstado");
-    $inversiones = $res->fetch_all(MYSQLI_ASSOC);
+        LEFT JOIN estados e ON e.idEstado = i.idEstado AND e.IdUsuario = i.IdUsuario
+        WHERE i.IdUsuario = ?");
+    $stmt->bind_param('i', $uid);
+    $stmt->execute();
+    $inversiones = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
     // Todas las cuotas de una vez (evita una consulta por inversión).
     $porInversion = [];
-    $res = $mysql->query("SELECT p.*, e.NombreEstado FROM PlanPagos p LEFT JOIN estados e ON e.idEstado = p.IdEstado ORDER BY p.idInversion, p.NroCuota, p.idPlan");
-    foreach ($res->fetch_all(MYSQLI_ASSOC) as $f) {
+    $stmt = $mysql->prepare("SELECT p.*, e.NombreEstado FROM PlanPagos p
+        INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+        LEFT JOIN estados e ON e.idEstado = p.IdEstado AND e.IdUsuario = i.IdUsuario
+        WHERE i.IdUsuario = ? ORDER BY p.idInversion, p.NroCuota, p.idPlan");
+    $stmt->bind_param('i', $uid);
+    $stmt->execute();
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
         $f['FechaPrevistaPago'] = invFecha($f['FechaPrevistaPago']);
         $f['FechaRealPago'] = invFecha($f['FechaRealPago']);
         $f['cobrada'] = ($f['NombreEstado'] === 'Cobrado');

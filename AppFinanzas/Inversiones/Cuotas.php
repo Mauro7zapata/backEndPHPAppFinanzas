@@ -26,6 +26,16 @@ function numeroValor($d, $k, $defecto = 0.0) {
     return is_numeric($v) ? (float)$v : null;
 }
 
+// Cuota (con su inversión) solo si pertenece al usuario autenticado; null si no existe o es de otro usuario.
+function cuotaDelUsuario($idPlan) {
+    global $mysql, $uid;
+    $q = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrevistaPago FROM PlanPagos p
+        INNER JOIN Inversiones i ON i.idInversion = p.idInversion WHERE p.idPlan = ? AND i.IdUsuario = ?");
+    $q->bind_param('ii', $idPlan, $uid);
+    $q->execute();
+    return $q->get_result()->fetch_assoc() ?: null;
+}
+
 function validarImportes($d) {
     foreach (['interes', 'capital', 'dividendo'] as $k) {
         $v = numeroValor($d, $k, 0.0);
@@ -80,8 +90,9 @@ try {
             $interes = numeroValor($d, 'interes'); $capital = numeroValor($d, 'capital'); $dividendo = numeroValor($d, 'dividendo');
             $estado = invEstadoId('Pagos', 'Pendiente');
             $fecha = $d['fechaPrevista'];
-            $stmt = $mysql->prepare("INSERT INTO PlanPagos (idInversion, NroCuota, FechaPrevistaPago, FechaRealPago, InteresPagado, CapitalPagado, DividendoPagado, IdEstado) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)");
-            $stmt->bind_param('iisdddi', $id, $nro, $fecha, $interes, $capital, $dividendo, $estado);
+            $stmt = $mysql->prepare("INSERT INTO PlanPagos (idInversion, NroCuota, FechaPrevistaPago, FechaRealPago, InteresPagado, CapitalPagado, DividendoPagado, IdEstado)
+                SELECT i.idInversion, ?, ?, NULL, ?, ?, ?, ? FROM Inversiones i WHERE i.idInversion = ? AND i.IdUsuario = ?");
+            $stmt->bind_param('isdddiii', $nro, $fecha, $interes, $capital, $dividendo, $estado, $id, $uid);
             $stmt->execute();
             echo json_encode(['id' => $mysql->insert_id, 'nroCuota' => $nro]);
             break;
@@ -93,33 +104,35 @@ try {
             if ($e = validarImportes($d)) { echo json_encode(['error' => $e]); break; }
             $interes = numeroValor($d, 'interes'); $capital = numeroValor($d, 'capital'); $dividendo = numeroValor($d, 'dividendo');
             $fecha = $d['fechaPrevista'];
-            $q = $mysql->prepare("SELECT idInversion, NroCuota, FechaPrevistaPago FROM PlanPagos WHERE idPlan = ?");
-            $q->bind_param('i', $idPlan); $q->execute();
-            $fila = $q->get_result()->fetch_assoc();
+            $fila = cuotaDelUsuario($idPlan);
             if (!$fila) { echo json_encode(['updated' => false]); break; }
-            $stmt = $mysql->prepare("UPDATE PlanPagos SET FechaPrevistaPago = ?, InteresPagado = ?, CapitalPagado = ?, DividendoPagado = ? WHERE idPlan = ?");
-            $stmt->bind_param('sdddi', $fecha, $interes, $capital, $dividendo, $idPlan);
+            $stmt = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+                SET p.FechaPrevistaPago = ?, p.InteresPagado = ?, p.CapitalPagado = ?, p.DividendoPagado = ? WHERE p.idPlan = ? AND i.IdUsuario = ?");
+            $stmt->bind_param('sdddii', $fecha, $interes, $capital, $dividendo, $idPlan, $uid);
             $stmt->execute();
             if (array_key_exists('observaciones', $d)) {
                 $obs = invObservacion($d['observaciones']);
-                $st = $mysql->prepare("UPDATE PlanPagos SET Observaciones = ? WHERE idPlan = ?");
-                $st->bind_param('si', $obs, $idPlan); $st->execute();
+                $st = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+                    SET p.Observaciones = ? WHERE p.idPlan = ? AND i.IdUsuario = ?");
+                $st->bind_param('sii', $obs, $idPlan, $uid); $st->execute();
             }
             // Si se movió la fecha, las pendientes siguientes se corren mes a mes desde la nueva fecha (las cobradas no se tocan).
             $corridas = 0;
             if (!empty($d['recalcularSiguientes']) && $fila['FechaPrevistaPago'] !== $fecha) {
                 $cobrado = invEstadoId('Pagos', 'Cobrado');
                 $idInv = (int)$fila['idInversion']; $nro = (int)$fila['NroCuota'];
-                $sg = $mysql->prepare("SELECT idPlan, NroCuota FROM PlanPagos WHERE idInversion = ? AND NroCuota > ? AND IdEstado <> ? ORDER BY NroCuota, idPlan");
-                $sg->bind_param('iii', $idInv, $nro, $cobrado); $sg->execute();
+                $sg = $mysql->prepare("SELECT p.idPlan, p.NroCuota FROM PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+                    WHERE p.idInversion = ? AND p.NroCuota > ? AND p.IdEstado <> ? AND i.IdUsuario = ? ORDER BY p.NroCuota, p.idPlan");
+                $sg->bind_param('iiii', $idInv, $nro, $cobrado, $uid); $sg->execute();
                 $siguientes = $sg->get_result()->fetch_all(MYSQLI_ASSOC);
-                $up = $mysql->prepare("UPDATE PlanPagos SET FechaPrevistaPago = ? WHERE idPlan = ?");
+                $up = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+                    SET p.FechaPrevistaPago = ? WHERE p.idPlan = ? AND i.IdUsuario = ?");
                 $k = 0;
                 foreach ($siguientes as $s) {
                     $k++;
                     $nueva = invSumarMeses($fecha, $k);
                     $idp = (int)$s['idPlan'];
-                    $up->bind_param('si', $nueva, $idp); $up->execute();
+                    $up->bind_param('sii', $nueva, $idp, $uid); $up->execute();
                     $corridas++;
                 }
             }
@@ -145,9 +158,11 @@ try {
         case 'observar':
             $idPlan = appfinanzas_entero($d['idPlan'] ?? null);
             if ($idPlan === null) { echo json_encode(['error' => 'Falta idPlan']); break; }
+            if (!cuotaDelUsuario($idPlan)) { echo json_encode(['error' => 'La cuota no existe']); break; }
             $obs = invObservacion($d['observaciones'] ?? null);
-            $stmt = $mysql->prepare("UPDATE PlanPagos SET Observaciones = ? WHERE idPlan = ?");
-            $stmt->bind_param('si', $obs, $idPlan);
+            $stmt = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+                SET p.Observaciones = ? WHERE p.idPlan = ? AND i.IdUsuario = ?");
+            $stmt->bind_param('sii', $obs, $idPlan, $uid);
             $stmt->execute();
             echo json_encode(['updated' => true]);
             break;
@@ -155,13 +170,14 @@ try {
         case 'deshacer':
             $idPlan = appfinanzas_entero($d['idPlan'] ?? null);
             if ($idPlan === null) { echo json_encode(['error' => 'Falta idPlan']); break; }
-            $estado = invEstadoId('Pagos', 'Pendiente');
-            $stmt = $mysql->prepare("UPDATE PlanPagos SET IdEstado = ?, FechaRealPago = NULL WHERE idPlan = ?");
-            $stmt->bind_param('ii', $estado, $idPlan);
-            $stmt->execute();
-            $q = $mysql->prepare("SELECT idInversion FROM PlanPagos WHERE idPlan = ?");
-            $q->bind_param('i', $idPlan); $q->execute();
-            $fila = $q->get_result()->fetch_assoc();
+            $fila = cuotaDelUsuario($idPlan);
+            if ($fila) {
+                $estado = invEstadoId('Pagos', 'Pendiente');
+                $stmt = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+                    SET p.IdEstado = ?, p.FechaRealPago = NULL WHERE p.idPlan = ? AND i.IdUsuario = ?");
+                $stmt->bind_param('iii', $estado, $idPlan, $uid);
+                $stmt->execute();
+            }
             if ($fila) invRevisarLiquidacion((int)$fila['idInversion'], true);
             echo json_encode(['updated' => (bool)$fila]);
             break;
@@ -169,11 +185,10 @@ try {
         case 'eliminar':
             $idPlan = appfinanzas_entero($d['idPlan'] ?? null);
             if ($idPlan === null) { echo json_encode(['error' => 'Falta idPlan']); break; }
-            $q = $mysql->prepare("SELECT idInversion FROM PlanPagos WHERE idPlan = ?");
-            $q->bind_param('i', $idPlan); $q->execute();
-            $fila = $q->get_result()->fetch_assoc();
-            $stmt = $mysql->prepare("DELETE FROM PlanPagos WHERE idPlan = ?");
-            $stmt->bind_param('i', $idPlan);
+            $fila = cuotaDelUsuario($idPlan);
+            $stmt = $mysql->prepare("DELETE p FROM PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+                WHERE p.idPlan = ? AND i.IdUsuario = ?");
+            $stmt->bind_param('ii', $idPlan, $uid);
             $stmt->execute();
             if ($fila) invRevisarLiquidacion((int)$fila['idInversion']);
             echo json_encode(['deleted' => $stmt->affected_rows > 0]);

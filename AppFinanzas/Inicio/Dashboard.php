@@ -38,8 +38,8 @@ function dias_hasta($fecha) {
 }
 
 // ------------------------------------------------------------------ presupuesto del mes
-$stmt = $mysql->prepare("SELECT idPresupuesto, ValorPresupuesto, ExtrasMes FROM presupuestos WHERE Mes = ? AND Anho = ? LIMIT 1");
-$stmt->bind_param('ii', $mes, $anho);
+$stmt = $mysql->prepare("SELECT idPresupuesto, ValorPresupuesto, ExtrasMes FROM presupuestos WHERE IdUsuario = ? AND Mes = ? AND Anho = ? LIMIT 1");
+$stmt->bind_param('iii', $uid, $mes, $anho);
 $stmt->execute();
 $p = $stmt->get_result()->fetch_assoc();
 
@@ -61,9 +61,9 @@ if ($p) {
 
     $stmt = $mysql->prepare("SELECT e.NombreEstado AS estado, COUNT(*) AS n,
             COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(g.valorGastosMovimiento),0) AS pagado
-        FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado
+        FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = ?
         WHERE g.idPresupuesto = ? GROUP BY e.NombreEstado");
-    $stmt->bind_param('i', $idPresupuesto);
+    $stmt->bind_param('ii', $uid, $idPresupuesto);
     $stmt->execute();
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
         $presupuesto['gastosTotal'] += (int)$f['n'];
@@ -89,18 +89,18 @@ if ($p) {
     }
 
     $stmt = $mysql->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(g.CostoPrevisto - g.valorGastosMovimiento),0) AS falta
-        FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado
+        FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = ?
         WHERE g.idPresupuesto = ? AND e.NombreEstado IN ('Pendiente','En proceso') AND g.FechaLimite IS NOT NULL AND g.FechaLimite < ?");
-    $stmt->bind_param('is', $idPresupuesto, $hoyTxt);
+    $stmt->bind_param('iis', $uid, $idPresupuesto, $hoyTxt);
     $stmt->execute();
     $v = $stmt->get_result()->fetch_assoc();
     $presupuesto['vencidos'] = (int)$v['n'];
     $presupuesto['valorVencido'] = max(0.0, (float)$v['falta']);
 
     $stmt = $mysql->prepare("SELECT c.NombreCategoria AS nombre, SUM(g.valorGastosMovimiento) AS valor
-        FROM gastos g INNER JOIN categoriagastos c ON c.idCategoriaGastos = g.IdCategoria
+        FROM gastos g INNER JOIN categoriagastos c ON c.idCategoriaGastos = g.IdCategoria AND c.IdUsuario = ?
         WHERE g.idPresupuesto = ? GROUP BY c.idCategoriaGastos, c.NombreCategoria HAVING valor > 0 ORDER BY valor DESC LIMIT 5");
-    $stmt->bind_param('i', $idPresupuesto);
+    $stmt->bind_param('ii', $uid, $idPresupuesto);
     $stmt->execute();
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $c) {
         $categorias[] = ['nombre' => $c['nombre'], 'valor' => (float)$c['valor'],
@@ -118,8 +118,8 @@ $desdeIdx = $tendencia[0]['anho'] * 12 + $tendencia[0]['m'];
 $hastaIdx = $anho * 12 + $mes;
 $stmt = $mysql->prepare("SELECT p.Anho, p.Mes, p.ValorPresupuesto + COALESCE(p.ExtrasMes,0) AS total,
         COALESCE((SELECT SUM(g.valorGastosMovimiento) FROM gastos g WHERE g.idPresupuesto = p.idPresupuesto),0) AS gastado
-    FROM presupuestos p WHERE p.Anho * 12 + p.Mes BETWEEN ? AND ?");
-$stmt->bind_param('ii', $desdeIdx, $hastaIdx);
+    FROM presupuestos p WHERE p.IdUsuario = ? AND p.Anho * 12 + p.Mes BETWEEN ? AND ?");
+$stmt->bind_param('iii', $uid, $desdeIdx, $hastaIdx);
 $stmt->execute();
 foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $r) {
     foreach ($tendencia as &$t) {
@@ -132,9 +132,11 @@ $tendencia = array_map(function ($t) { return ['mes' => $t['mes'], 'gastado' => 
 // ------------------------------------------------------------------ deudas
 $deudas = ['total' => 0.0, 'tarjetas' => 0.0, 'prestamos' => 0.0, 'informales' => 0.0, 'cantidad' => 0, 'proximoPago' => null, 'cupoUsado' => null];
 $agenda = [];
-$res = $mysql->query("SELECT d.*, " . SQL_SALDO_DEUDA . " AS saldo FROM deudas d WHERE d.Activa = 1");
+$stmt = $mysql->prepare("SELECT d.*, " . SQL_SALDO_DEUDA . " AS saldo FROM deudas d WHERE d.IdUsuario = ? AND d.Activa = 1");
+$stmt->bind_param('i', $uid);
+$stmt->execute();
 $cupoTotal = 0.0; $cupoUsado = 0.0;
-foreach ($res->fetch_all(MYSQLI_ASSOC) as $d) {
+foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $d) {
     $saldo = max(0.0, (float)$d['saldo']);
     $deudas['cantidad']++;
     $deudas['total'] += $saldo;
@@ -160,8 +162,10 @@ if ($cupoTotal > 0) $deudas['cupoUsado'] = round($cupoUsado / $cupoTotal, 4);
 
 // ------------------------------------------------------------------ obligaciones anuales
 $obligaciones = ['cantidad' => 0, 'proxima' => null, 'provisionMes' => 0.0, 'vencidas' => 0];
-$res = $mysql->query("SELECT idObligacion, Nombre, ValorEstimado, FechaVencimiento FROM obligaciones WHERE Activa = 1 ORDER BY FechaVencimiento");
-foreach ($res->fetch_all(MYSQLI_ASSOC) as $o) {
+$stmt = $mysql->prepare("SELECT idObligacion, Nombre, ValorEstimado, FechaVencimiento FROM obligaciones WHERE IdUsuario = ? AND Activa = 1 ORDER BY FechaVencimiento");
+$stmt->bind_param('i', $uid);
+$stmt->execute();
+foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $o) {
     $obligaciones['cantidad']++;
     $d = dias_hasta($o['FechaVencimiento']);
     if ($obligaciones['proxima'] === null) {
@@ -174,8 +178,9 @@ foreach ($res->fetch_all(MYSQLI_ASSOC) as $o) {
     }
 }
 if ($idPresupuesto) {
-    $stmt = $mysql->prepare("SELECT COALESCE(SUM(CostoPrevisto),0) AS t FROM gastos WHERE idPresupuesto = ? AND idObligacion IS NOT NULL");
-    $stmt->bind_param('i', $idPresupuesto);
+    $stmt = $mysql->prepare("SELECT COALESCE(SUM(g.CostoPrevisto),0) AS t FROM gastos g INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto
+        WHERE g.idPresupuesto = ? AND pr.IdUsuario = ? AND g.idObligacion IS NOT NULL");
+    $stmt->bind_param('ii', $idPresupuesto, $uid);
     $stmt->execute();
     $obligaciones['provisionMes'] = (float)$stmt->get_result()->fetch_assoc()['t'];
 }
@@ -188,15 +193,15 @@ $inversiones = ['activas' => $inv['activas'], 'capitalActivo' => $inv['capitalAc
 
 $stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre
     FROM PlanPagos p
-    INNER JOIN Inversiones i ON i.idInversion = p.idInversion
-    INNER JOIN estados ei ON ei.idEstado = i.idEstado AND ei.NombreEstado = 'Desembolsado'
-    LEFT JOIN estados ep ON ep.idEstado = p.IdEstado
+    INNER JOIN Inversiones i ON i.idInversion = p.idInversion AND i.IdUsuario = ?
+    INNER JOIN estados ei ON ei.idEstado = i.idEstado AND ei.IdUsuario = i.IdUsuario AND ei.NombreEstado = 'Desembolsado'
+    LEFT JOIN estados ep ON ep.idEstado = p.IdEstado AND ep.IdUsuario = i.IdUsuario
     WHERE (ep.NombreEstado IS NULL OR ep.NombreEstado <> 'Cobrado') AND p.FechaPrevistaPago IS NOT NULL
       AND p.FechaPrevistaPago <= ? AND p.FechaPrevistaPago >= ?
     ORDER BY p.FechaPrevistaPago LIMIT 12");
 $hasta30 = date('Y-m-d', strtotime('+30 days'));
 $desde60 = date('Y-m-d', strtotime('-60 days'));
-$stmt->bind_param('ss', $hasta30, $desde60);
+$stmt->bind_param('iss', $uid, $hasta30, $desde60);
 $stmt->execute();
 foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $c) {
     $agenda[] = ['tipo' => 'cobro', 'id' => (int)$c['idPlan'], 'idInversion' => (int)$c['idInversion'], 'titulo' => 'Cobrar a ' . trim($c['Nombre']) . ' · cuota ' . $c['NroCuota'],
@@ -206,11 +211,11 @@ foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $c) {
 
 // Pagos del presupuesto pendientes (vencidos hace menos de 60 días o dentro de 30 días).
 $stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento, g.FechaLimite, pr.Mes AS mesP, pr.Anho AS anhoP
-    FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado
-    INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto
+    FROM gastos g INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto AND pr.IdUsuario = ?
+    INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = pr.IdUsuario
     WHERE e.NombreEstado IN ('Pendiente','En proceso') AND g.FechaLimite IS NOT NULL AND g.FechaLimite <= ? AND g.FechaLimite >= ?
     ORDER BY g.FechaLimite LIMIT 12");
-$stmt->bind_param('ss', $hasta30, $desde60);
+$stmt->bind_param('iss', $uid, $hasta30, $desde60);
 $stmt->execute();
 foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $g) {
     $agenda[] = ['tipo' => 'gasto', 'id' => (int)$g['idGastos'], 'mes' => (int)$g['mesP'], 'anho' => (int)$g['anhoP'], 'titulo' => $g['NombreGasto'], 'fecha' => $g['FechaLimite'],
@@ -221,20 +226,40 @@ $agendaTotal = count($agenda);
 $agenda = array_slice($agenda, 0, 10);
 
 // ------------------------------------------------------------------ hábito de registro
-$res = $mysql->query("SELECT DISTINCT fechaMovimiento AS f FROM movimientos WHERE fechaMovimiento >= DATE_SUB('$hoyTxt', INTERVAL 90 DAY) AND fechaMovimiento <= '$hoyTxt' ORDER BY f DESC");
-$dias = array_column($res->fetch_all(MYSQLI_ASSOC), 'f');
+// Movimientos del usuario: movimientos -> gastos -> presupuestos (IdUsuario).
+$stmt = $mysql->prepare("SELECT DISTINCT m.fechaMovimiento AS f FROM movimientos m
+    INNER JOIN gastos g ON g.idGastos = m.idGasto
+    INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto AND pr.IdUsuario = ?
+    WHERE m.fechaMovimiento >= DATE_SUB(?, INTERVAL 90 DAY) AND m.fechaMovimiento <= ? ORDER BY f DESC");
+$stmt->bind_param('iss', $uid, $hoyTxt, $hoyTxt);
+$stmt->execute();
+$dias = array_column($stmt->get_result()->fetch_all(MYSQLI_ASSOC), 'f');
 $tieneHoy = in_array($hoyTxt, $dias, true);
 $racha = 0;
 $cursor = new DateTime($hoyTxt);
 if (!$tieneHoy) $cursor->modify('-1 day');   // la racha sigue viva si el último registro fue ayer
 while (in_array($cursor->format('Y-m-d'), $dias, true)) { $racha++; $cursor->modify('-1 day'); }
-$ultimo = $mysql->query("SELECT MAX(fechaMovimiento) AS f FROM movimientos WHERE fechaMovimiento <= '$hoyTxt'")->fetch_assoc()['f'];
+$stmt = $mysql->prepare("SELECT MAX(m.fechaMovimiento) AS f FROM movimientos m
+    INNER JOIN gastos g ON g.idGastos = m.idGasto
+    INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto AND pr.IdUsuario = ?
+    WHERE m.fechaMovimiento <= ?");
+$stmt->bind_param('is', $uid, $hoyTxt);
+$stmt->execute();
+$ultimo = $stmt->get_result()->fetch_assoc()['f'];
 $diasSinRegistrar = $ultimo ? max(0, -dias_hasta($ultimo)) : null;
-$movHoy = (int)$mysql->query("SELECT COUNT(*) AS n FROM movimientos WHERE fechaMovimiento = '$hoyTxt'")->fetch_assoc()['n'];
-$stmt = $mysql->prepare("SELECT COUNT(*) AS n FROM movimientos m INNER JOIN gastos g ON g.idGastos = m.idGasto WHERE g.idPresupuesto = ?");
+$stmt = $mysql->prepare("SELECT COUNT(*) AS n FROM movimientos m
+    INNER JOIN gastos g ON g.idGastos = m.idGasto
+    INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto AND pr.IdUsuario = ?
+    WHERE m.fechaMovimiento = ?");
+$stmt->bind_param('is', $uid, $hoyTxt);
+$stmt->execute();
+$movHoy = (int)$stmt->get_result()->fetch_assoc()['n'];
+$stmt = $mysql->prepare("SELECT COUNT(*) AS n FROM movimientos m INNER JOIN gastos g ON g.idGastos = m.idGasto
+    INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto AND pr.IdUsuario = ?
+    WHERE g.idPresupuesto = ?");
 $movMes = 0;
 if ($idPresupuesto) {
-    $stmt->bind_param('i', $idPresupuesto);
+    $stmt->bind_param('ii', $uid, $idPresupuesto);
     $stmt->execute();
     $movMes = (int)$stmt->get_result()->fetch_assoc()['n'];
 }

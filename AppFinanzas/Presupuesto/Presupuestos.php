@@ -1,5 +1,6 @@
 <?php
 require_once("../db.php");
+require_once(__DIR__ . '/../lib.php');
 
 // Función para manejar respuestas
 function enviarRespuesta($status, $message) {
@@ -33,7 +34,7 @@ function validarDatosPresupuesto($data) {
 }
 
 function insertarPresupuesto($data) {
-    global $mysql;
+    global $mysql, $uid;
 
     list($d, $error) = validarDatosPresupuesto($data);
     if ($error) {
@@ -41,17 +42,17 @@ function insertarPresupuesto($data) {
         return;
     }
 
-    // Verificar si ya existe un presupuesto con el mismo año y mes
-    $stmtVerificar = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE Anho = ? AND Mes = ?");
-    $stmtVerificar->bind_param("ii", $d["anho"], $d["mes"]);
+    // Verificar si el usuario ya tiene un presupuesto con el mismo año y mes
+    $stmtVerificar = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE Anho = ? AND Mes = ? AND IdUsuario = ?");
+    $stmtVerificar->bind_param("iii", $d["anho"], $d["mes"], $uid);
     $stmtVerificar->execute();
     if ($stmtVerificar->get_result()->num_rows > 0) {
         enviarRespuesta("error", "Ya existe un presupuesto para el mes y año proporcionados");
         return;
     }
 
-    $stmt = $mysql->prepare("INSERT INTO presupuestos (ValorPresupuesto, ExtrasMes, Anho, Mes) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param("iiii", $d["valor"], $d["extras"], $d["anho"], $d["mes"]);
+    $stmt = $mysql->prepare("INSERT INTO presupuestos (ValorPresupuesto, ExtrasMes, Anho, Mes, IdUsuario) VALUES (?, ?, ?, ?, ?)");
+    $stmt->bind_param("iiiii", $d["valor"], $d["extras"], $d["anho"], $d["mes"], $uid);
 
     if ($stmt->execute()) {
         enviarRespuesta("success", "Presupuesto insertado correctamente");
@@ -62,7 +63,7 @@ function insertarPresupuesto($data) {
 
 // Editar un presupuesto (se identifica por año y mes)
 function editarPresupuesto($data) {
-    global $mysql;
+    global $mysql, $uid;
 
     list($d, $error) = validarDatosPresupuesto($data);
     if ($error) {
@@ -70,16 +71,16 @@ function editarPresupuesto($data) {
         return;
     }
 
-    $stmtVerificar = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE Anho = ? AND Mes = ?");
-    $stmtVerificar->bind_param("ii", $d["anho"], $d["mes"]);
+    $stmtVerificar = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE Anho = ? AND Mes = ? AND IdUsuario = ?");
+    $stmtVerificar->bind_param("iii", $d["anho"], $d["mes"], $uid);
     $stmtVerificar->execute();
     if ($stmtVerificar->get_result()->num_rows === 0) {
         enviarRespuesta("error", "No se encontró el presupuesto para el mes y año proporcionados");
         return;
     }
 
-    $stmt = $mysql->prepare("UPDATE presupuestos SET ValorPresupuesto = ?, ExtrasMes = ? WHERE Anho = ? AND Mes = ?");
-    $stmt->bind_param("iiii", $d["valor"], $d["extras"], $d["anho"], $d["mes"]);
+    $stmt = $mysql->prepare("UPDATE presupuestos SET ValorPresupuesto = ?, ExtrasMes = ? WHERE Anho = ? AND Mes = ? AND IdUsuario = ?");
+    $stmt->bind_param("iiiii", $d["valor"], $d["extras"], $d["anho"], $d["mes"], $uid);
 
     if ($stmt->execute()) {
         enviarRespuesta("success", "Presupuesto actualizado correctamente");
@@ -90,7 +91,7 @@ function editarPresupuesto($data) {
 
 // Eliminar un presupuesto (solo si no tiene gastos: la BD borraría los gastos en cascada)
 function eliminarPresupuesto($idPresupuesto) {
-    global $mysql;
+    global $mysql, $uid;
 
     $id = appfinanzas_entero($idPresupuesto);
     if ($id === null || $id <= 0) {
@@ -98,8 +99,9 @@ function eliminarPresupuesto($idPresupuesto) {
         return;
     }
 
-    $stmtGastos = $mysql->prepare("SELECT COUNT(*) AS total FROM gastos WHERE idPresupuesto = ?");
-    $stmtGastos->bind_param("i", $id);
+    $stmtGastos = $mysql->prepare("SELECT COUNT(*) AS total FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        WHERE g.idPresupuesto = ? AND p.IdUsuario = ?");
+    $stmtGastos->bind_param("ii", $id, $uid);
     $stmtGastos->execute();
     $total = (int)$stmtGastos->get_result()->fetch_assoc()['total'];
     if ($total > 0) {
@@ -107,8 +109,8 @@ function eliminarPresupuesto($idPresupuesto) {
         return;
     }
 
-    $stmt = $mysql->prepare("DELETE FROM presupuestos WHERE idPresupuesto = ?");
-    $stmt->bind_param("i", $id);
+    $stmt = $mysql->prepare("DELETE FROM presupuestos WHERE idPresupuesto = ? AND IdUsuario = ?");
+    $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
 
     if ($stmt->affected_rows > 0) {
@@ -120,22 +122,20 @@ function eliminarPresupuesto($idPresupuesto) {
 
 // Consultar todos los presupuestos (lista vacía si no hay)
 function consultarPresupuestos() {
-    global $mysql;
+    global $mysql, $uid;
 
     $query = "SELECT idPresupuesto, ValorPresupuesto, COALESCE(ExtrasMes, 0) AS ExtrasMes, Anho, Mes
-              FROM presupuestos ORDER BY Anho, Mes";
-    $result = $mysql->query($query);
-
-    $response = [];
-    while ($row = $result->fetch_assoc()) {
-        $response[] = $row;
-    }
+              FROM presupuestos WHERE IdUsuario = ? ORDER BY Anho, Mes";
+    $stmt = $mysql->prepare($query);
+    $stmt->bind_param("i", $uid);
+    $stmt->execute();
+    $response = appfinanzas_filas_texto($stmt->get_result());
     header('Content-Type: application/json');
     echo json_encode($response);
 }
 
 function consultarPresupuestoPorMesAnho($mes, $anho) {
-    global $mysql;
+    global $mysql, $uid;
 
     $mes = appfinanzas_entero($mes);
     $anho = appfinanzas_entero($anho);
@@ -145,9 +145,9 @@ function consultarPresupuestoPorMesAnho($mes, $anho) {
     }
 
     $query = "SELECT idPresupuesto, ValorPresupuesto, COALESCE(ExtrasMes, 0) AS ExtrasMes, Anho, Mes
-              FROM presupuestos WHERE Mes = ? AND Anho = ?";
+              FROM presupuestos WHERE Mes = ? AND Anho = ? AND IdUsuario = ?";
     $stmt = $mysql->prepare($query);
-    $stmt->bind_param("ii", $mes, $anho);
+    $stmt->bind_param("iii", $mes, $anho, $uid);
     $stmt->execute();
 
     $result = $stmt->get_result();
@@ -161,7 +161,7 @@ function consultarPresupuestoPorMesAnho($mes, $anho) {
 
 // Consultar costos previstos por estado para un presupuesto (lista vacía si no hay gastos)
 function consultarCostosPorEstado($idPresupuesto) {
-    global $mysql;
+    global $mysql, $uid;
 
     $id = appfinanzas_entero($idPresupuesto);
     if ($id === null) {
@@ -172,11 +172,12 @@ function consultarCostosPorEstado($idPresupuesto) {
     $query = "
         SELECT e.NombreEstado, e.ColorEstado, SUM(g.CostoPrevisto) AS TotalCostoPrevisto
         FROM gastos g
-        INNER JOIN estados e ON g.IdEstado = e.idEstado
-        WHERE g.idPresupuesto = ?
+        INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        INNER JOIN estados e ON g.IdEstado = e.idEstado AND e.IdUsuario = p.IdUsuario
+        WHERE g.idPresupuesto = ? AND p.IdUsuario = ?
         GROUP BY e.NombreEstado, e.ColorEstado";
     $stmt = $mysql->prepare($query);
-    $stmt->bind_param("i", $id);
+    $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
 
     $response = [];

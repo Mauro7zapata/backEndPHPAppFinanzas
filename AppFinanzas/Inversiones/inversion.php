@@ -19,7 +19,7 @@ function numeroDe($d, $k) {
 }
 
 function validarInversion($d, $esCrear) {
-    global $mysql;
+    global $mysql, $uid;
     if (trim($d['Nombre'] ?? '') === '' || mb_strlen($d['Nombre'], 'UTF-8') > 255) return 'El nombre es obligatorio (máx. 255 caracteres)';
     $tipo = appfinanzas_entero($d['IdTipo'] ?? null);
     if ($tipo === null) return 'El tipo de inversión no es válido';
@@ -46,15 +46,15 @@ function validarInversion($d, $esCrear) {
     if (!$esCrear || isset($d['idEstado'])) {
         $est = appfinanzas_entero($d['idEstado'] ?? null);
         if ($est === null) return 'El estado no es válido';
-        $q = $mysql->prepare("SELECT 1 FROM estados WHERE idEstado = ? AND TipoEstado = 'Inversion'");
-        $q->bind_param('i', $est); $q->execute();
+        $q = $mysql->prepare("SELECT 1 FROM estados WHERE idEstado = ? AND TipoEstado = 'Inversion' AND IdUsuario = ?");
+        $q->bind_param('ii', $est, $uid); $q->execute();
         if (!$q->get_result()->fetch_row()) return 'El estado no corresponde a una inversión';
     }
     return null;
 }
 
 function procesarAccion($data) {
-    global $mysql;
+    global $mysql, $uid;
     $accion = $data['accion'] ?? '';
 
     try {
@@ -75,16 +75,16 @@ function procesarAccion($data) {
                 $estado = isset($data['idEstado']) ? appfinanzas_entero($data['idEstado']) : invEstadoId('Inversion', 'Desembolsado');
 
                 if ($crear) {
-                    $stmt = $mysql->prepare("INSERT INTO Inversiones (Nombre, IdTipo, CapitalInvertido, FechaInicio, FechaFin, Interes, NroCuotas, CuotaPactada, PeriodicidadPagoDividendos, idEstado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                    $stmt->bind_param('sidssdidii', $nombre, $tipo, $capital, $inicio, $fin, $tasa, $nro, $cuota, $per, $estado);
+                    $stmt = $mysql->prepare("INSERT INTO Inversiones (Nombre, IdTipo, CapitalInvertido, FechaInicio, FechaFin, Interes, NroCuotas, CuotaPactada, PeriodicidadPagoDividendos, idEstado, IdUsuario) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    $stmt->bind_param('sidssdidiii', $nombre, $tipo, $capital, $inicio, $fin, $tasa, $nro, $cuota, $per, $estado, $uid);
                     $stmt->execute();
                     echo json_encode(['id' => $mysql->insert_id]);
                 } else {
                     $id = appfinanzas_entero($data['idInversion'] ?? null);
                     if ($id === null) { echo json_encode(['error' => 'Falta idInversion']); return; }
                     $anterior = invCargar($id);
-                    $stmt = $mysql->prepare("UPDATE Inversiones SET Nombre=?, IdTipo=?, CapitalInvertido=?, FechaInicio=?, FechaFin=?, Interes=?, NroCuotas=?, CuotaPactada=?, PeriodicidadPagoDividendos=?, idEstado=? WHERE idInversion=?");
-                    $stmt->bind_param('sidssdidiii', $nombre, $tipo, $capital, $inicio, $fin, $tasa, $nro, $cuota, $per, $estado, $id);
+                    $stmt = $mysql->prepare("UPDATE Inversiones SET Nombre=?, IdTipo=?, CapitalInvertido=?, FechaInicio=?, FechaFin=?, Interes=?, NroCuotas=?, CuotaPactada=?, PeriodicidadPagoDividendos=?, idEstado=? WHERE idInversion=? AND IdUsuario=?");
+                    $stmt->bind_param('sidssdidiiii', $nombre, $tipo, $capital, $inicio, $fin, $tasa, $nro, $cuota, $per, $estado, $id, $uid);
                     $stmt->execute();
                     $actualizada = $stmt->affected_rows > 0;
                     // Si cambió la fecha final, el plan se ajusta al nuevo plazo (las cuotas cobradas no se tocan).
@@ -99,10 +99,11 @@ function procesarAccion($data) {
                 if ($id === null) { echo json_encode(['error' => 'Falta idInversion']); return; }
                 $mysql->begin_transaction();
                 try {
-                    $stmt = $mysql->prepare("DELETE FROM PlanPagos WHERE idInversion = ?");
-                    $stmt->bind_param('i', $id); $stmt->execute();
-                    $stmt = $mysql->prepare("DELETE FROM Inversiones WHERE idInversion = ?");
-                    $stmt->bind_param('i', $id); $stmt->execute();
+                    $stmt = $mysql->prepare("DELETE p FROM PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+                        WHERE p.idInversion = ? AND i.IdUsuario = ?");
+                    $stmt->bind_param('ii', $id, $uid); $stmt->execute();
+                    $stmt = $mysql->prepare("DELETE FROM Inversiones WHERE idInversion = ? AND IdUsuario = ?");
+                    $stmt->bind_param('ii', $id, $uid); $stmt->execute();
                     $mysql->commit();
                 } catch (Throwable $e) { $mysql->rollback(); throw $e; }
                 echo json_encode(['deleted' => $stmt->affected_rows > 0]);
@@ -148,12 +149,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 } else {
     $id = appfinanzas_entero($_GET['id'] ?? null);
     if ($id !== null) {
-        $stmt = $mysql->prepare("SELECT * FROM Inversiones WHERE idInversion = ?");
-        $stmt->bind_param('i', $id);
+        $stmt = $mysql->prepare("SELECT * FROM Inversiones WHERE idInversion = ? AND IdUsuario = ?");
+        $stmt->bind_param('ii', $id, $uid);
         $stmt->execute();
         $filas = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     } else {
-        $filas = $mysql->query("SELECT * FROM Inversiones ORDER BY idEstado ASC, FechaInicio DESC")->fetch_all(MYSQLI_ASSOC);
+        $stmt = $mysql->prepare("SELECT * FROM Inversiones WHERE IdUsuario = ? ORDER BY idEstado ASC, FechaInicio DESC");
+        $stmt->bind_param('i', $uid);
+        $stmt->execute();
+        $filas = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     }
     echo json_encode(array_map('filaInversion', $filas), JSON_UNESCAPED_UNICODE);
 }

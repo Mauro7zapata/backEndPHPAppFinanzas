@@ -1,16 +1,20 @@
 <?php
 require_once("../db.php");
+require_once(__DIR__ . '/../lib.php');
 
 // Consultar Categorías de Gastos
 function consultarCategoriasGastos() {
-    global $mysql;
-    $query = "SELECT * FROM categoriagastos";
-    $result = $mysql->query($query);
+    global $mysql, $uid;
+    $query = "SELECT * FROM categoriagastos WHERE IdUsuario = ?";
+    $stmt = $mysql->prepare($query);
+    $stmt->bind_param("i", $uid);
+    $stmt->execute();
+    $result = $stmt->get_result();
     
     $response = [];
     
     if ($result->num_rows > 0) {
-        while ($row = $result->fetch_assoc()) {
+        while ($row = appfinanzas_fila_texto($result->fetch_assoc())) {
             $response[] = [
                 "idCategoriaGastos" => $row['idCategoriaGastos'],
                 "NombreCategoria" => $row['NombreCategoria'],
@@ -29,13 +33,13 @@ function consultarCategoriasGastos() {
 }
 // Consultar Categorías de Gastos
 function consultarCategoriasGastosId($id) {
-    global $mysql;
+    global $mysql, $uid;
     $query = "SELECT * FROM categoriagastos 
-                WHERE idCategoriaGastos = ?";
+                WHERE idCategoriaGastos = ? AND IdUsuario = ?";
     $stmt = $mysql->prepare($query);
 
     if ($stmt) {
-        $stmt->bind_param("i", $id); // Asegúrate de pasar el ID como un entero
+        $stmt->bind_param("ii", $id, $uid); // Asegúrate de pasar el ID como un entero
 
         $stmt->execute();
         $result = $stmt->get_result();
@@ -66,11 +70,11 @@ function consultarCategoriasGastosId($id) {
 
 // Insertar Categorías de Gastos
 function insertarCategoriaGastos($data) {
-    global $mysql;
-    $query = "INSERT INTO categoriagastos (NombreCategoria, ColorCategoria, ImagenCategoria) VALUES (?, ?, ?)";
+    global $mysql, $uid;
+    $query = "INSERT INTO categoriagastos (NombreCategoria, ColorCategoria, ImagenCategoria, IdUsuario) VALUES (?, ?, ?, ?)";
     $stmt = $mysql->prepare($query);
     if ($stmt) {
-        $stmt->bind_param("sss", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria']);
+        $stmt->bind_param("sssi", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $uid);
         if ($stmt->execute()) {
             echo "Categoría de gasto insertada correctamente.";
         } else {
@@ -84,11 +88,16 @@ function insertarCategoriaGastos($data) {
 
 // Editar Categorías de Gastos
 function editarCategoriaGastos($data) {
-    global $mysql;
-    $query = "UPDATE categoriagastos SET NombreCategoria = ?, ColorCategoria = ?, ImagenCategoria = ? WHERE idCategoriaGastos = ?";
+    global $mysql, $uid;
+    // La categoría debe ser del usuario (no se revela si existe para otro usuario).
+    if (!appfinanzas_es_propio('categoriagastos', $data['id'] ?? null)) {
+        echo "Error al actualizar la categoría de gasto: la categoría no existe.";
+        return;
+    }
+    $query = "UPDATE categoriagastos SET NombreCategoria = ?, ColorCategoria = ?, ImagenCategoria = ? WHERE idCategoriaGastos = ? AND IdUsuario = ?";
     $stmt = $mysql->prepare($query);
     if ($stmt) {
-        $stmt->bind_param("sssi", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $data['id']);
+        $stmt->bind_param("sssii", $data['NombreCategoria'], $data['ColorCategoria'], $data['ImagenCategoria'], $data['id'], $uid);
         if ($stmt->execute()) {
             echo "Categoría de gasto actualizada correctamente.";
         } else {
@@ -103,22 +112,29 @@ function editarCategoriaGastos($data) {
 
 // Eliminar Categorías de Gastos
 function eliminarCategoriaGastos($id) {
-    global $mysql;
+    global $mysql, $uid;
 
+    // La categoría debe ser del usuario (no se revela si existe para otro usuario).
+    if (!appfinanzas_es_propio('categoriagastos', $id)) {
+        echo "Error al eliminar la categoría de gasto: la categoría no existe.";
+        return;
+    }
     // Evita dejar gastos huérfanos: las consultas hacen INNER JOIN con la categoría y desaparecerían del listado.
-    $stmtUso = $mysql->prepare("SELECT COUNT(*) AS total FROM gastos WHERE IdCategoria = ?");
-    $stmtUso->bind_param("i", $id);
+    $stmtUso = $mysql->prepare("SELECT COUNT(*) AS total FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        WHERE g.IdCategoria = ? AND p.IdUsuario = ?");
+    $stmtUso->bind_param("ii", $id, $uid);
     $stmtUso->execute();
     $enUso = (int)$stmtUso->get_result()->fetch_assoc()['total'];
     if ($enUso > 0) {
         echo "No se puede eliminar la categoría porque tiene $enUso gasto(s) asociados. Reasígnalos primero.";
         return;
     }
-    $query = "DELETE FROM categoriagastos WHERE idCategoriaGastos=?";
+    $query = "DELETE FROM categoriagastos WHERE idCategoriaGastos=? AND IdUsuario = ?";
     $stmt = $mysql->prepare($query);
     $stmt->bind_param(
-        "i", 
-        $id
+        "ii", 
+        $id,
+        $uid
     );
 
     if ($stmt->execute()) {
