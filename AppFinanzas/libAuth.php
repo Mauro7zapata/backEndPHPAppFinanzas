@@ -188,6 +188,7 @@ function authSembrarUsuario($idUsuario)
         ['Gastos', 'Acumulado', -7791], ['Gastos', 'En proceso', -4915975], ['Gastos', 'No aplica', -60934],
         ['Inversion', 'Desembolsado', -9250817], ['Inversion', 'Liquidado', 1866496], ['Inversion', 'Perdida', -56575],
         ['Pagos', 'Pendiente', 6536703], ['Pagos', 'Cobrado', 1866496], ['Pagos', 'En gestion', -56064],
+        ['Presupuestos', 'En curso', -14575885], ['Presupuestos', 'Finalizado', -11751600],
     ];
     $q = $mysql->prepare("INSERT INTO estados (TipoEstado, NombreEstado, ColorEstado, IdUsuario) VALUES (?, ?, ?, ?)");
     foreach ($estados as [$tipo, $nombre, $color]) {
@@ -208,6 +209,17 @@ function authSembrarUsuario($idUsuario)
         $q->execute();
     }
     $q->close();
+    // Lugares de guardado de ejemplo (migración 012); si aún no existe la tabla, se omite sin romper el registro.
+    try {
+        $q = $mysql->prepare("INSERT INTO lugares_guardado (IdUsuario, Nombre) VALUES (?, ?)");
+        foreach (['Bolsillo físico', 'Bolsillo Nequi', 'Bolsillo Bancolombia', 'Meta Nequi'] as $lugar) {
+            $q->bind_param('is', $idUsuario, $lugar);
+            $q->execute();
+        }
+        $q->close();
+    } catch (mysqli_sql_exception $e) {
+        if ((int)$e->getCode() !== 1146) throw $e;
+    }
 }
 
 // Crea un usuario nuevo con sus datos iniciales (transacción). Devuelve el usuario.

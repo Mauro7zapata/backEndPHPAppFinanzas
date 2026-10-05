@@ -1,5 +1,30 @@
 # Changelog · Backend
 
+## 2026-10-05 (16) · Lugares de guardado (catálogo) para Guardado/Acumulado
+**Requiere ejecutar `sql/012_lugares_guardado.sql` (con respaldo).** Antes de migrar todo sigue funcionando (el selector simplemente no aparece).
+- `sql/012_lugares_guardado.sql`: tabla `lugares_guardado` (por usuario, nombre único) con 4 lugares de ejemplo por usuario y columna `gastos.idLugar` (FK `ON DELETE SET NULL`).
+- `Presupuesto/LugaresGuardado.php` (nuevo): GET → lugares con guardado/acumulado/total por lugar y «sin lugar» (opcional `?idPresupuesto=`); POST `crear` / `renombrar` / `eliminar`.
+- `Presupuesto/Gastos.php`: las consultas devuelven `idLugar`/`NombreLugar`; insertar/editar asigna el lugar (`asignarLugarGasto`) validando que sea del usuario.
+- `lib.php`: `gastosTieneLugar()`, `sqlLugarGasto()`; `libAuth.php`: usuarios nuevos reciben los 4 lugares de ejemplo.
+- Nota: el detalle por lugar suma los movimientos de gastos Guardado/Acumulado; el «ahorro inicial» de obligaciones no tiene lugar y no se incluye.
+
+## 2026-10-05 (15) · Guardado/Acumulado, obligación en el gasto, presupuesto Finalizado y fondo de inversión
+
+**SQL: `010_presupuesto_finalizado.sql` y `011_fondo_inversion.sql` (idempotentes; sin ellas el resto sigue funcionando y estas funciones se ignoran). Subir: `lib.php`, `libInversiones.php`, `libAuth.php`, `Estados.php`, `Presupuesto/Gastos.php`, `Presupuesto/Presupuestos.php`, `Presupuesto/Plantilla.php`, `Inicio/Dashboard.php`, `Deudas/Obligaciones.php` e `Inversiones/Fondo.php` (nuevo).**
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Guardado y Acumulado arriba | `Inicio/Dashboard.php` | `presupuesto` ahora trae `guardado`, `acumulado`, sus previstos y `acumuladoObligaciones` (total acumulado del ciclo de las obligaciones); `ahorrado` se conserva | Ver lo separado del disponible | Campos nuevos; los anteriores no cambian |
+| Gasto ↔ obligación | `Presupuesto/Gastos.php` | Acepta `idObligacion` (valida que sea del usuario) y devuelve `idObligacion` y `NombreObligacion` en todas las consultas | Asociar la obligación con el gasto, como con las deudas | Sin `idObligacion` en la petición el vínculo no se toca |
+| Ahorro de obligaciones | `lib.php` (`ahorradoObligacion`) | Solo suman los gastos vinculados en estado **Acumulado**; los **Pagado** son el pago de la obligación | Que pagar el SOAT no cuente como ahorro | Un gasto de provisión que hubieras dejado en «Pagado» ya no cuenta como ahorro |
+| Movimientos de la obligación | `Deudas/Obligaciones.php` | `GET ?detalle=ID`: movimientos y gastos vinculados con acumulado y pagado del ciclo | Ver desde la obligación lo registrado en cada presupuesto | Endpoint nuevo |
+| Estado Finalizado | `lib.php`, `Presupuesto/Presupuestos.php`, `sql/010` | Estados «En curso» / «Finalizado» (tipo `Presupuestos`, editables en Configuraciones); finaliza solo cuando no quedan gastos Pendiente/En proceso ni Guardado/Acumulado incompletos; se reabre solo si aparece uno (salvo cierre manual); acciones `finalizar` (con `forzar`) y `reabrir` | Cierre de mes ordenado | Columnas nuevas en `presupuestos`; los anteriores al mes pasado quedan Finalizados |
+| Cierre de mes | `Presupuesto/Presupuestos.php`, `Inicio/Dashboard.php` | No se puede crear un presupuesto si un mes ya terminado (con gastos) sigue sin finalizar; mensaje en el inicio | Regla del usuario | `insertar` responde `bloqueado` con el mes pendiente |
+| Presupuesto finalizado a mano | `Presupuesto/Gastos.php`, `Plantilla.php` | No admiten gastos nuevos hasta reabrir | Coherencia del cierre | Mensaje claro |
+| Estados | `Estados.php`, `libAuth.php` | No se elimina un estado en uso por presupuestos; los usuarios nuevos reciben los dos estados | Integridad | — |
+| Fondo de inversión | `Inversiones/Fondo.php` (nuevo), `libInversiones.php`, `sql/011` | Disponible = ingresos − retiros + ajustes + cobrado − capital desembolsado; invertido = capital en la calle; **descuadre** = suma de ajustes (al conciliar se compara lo declarado con lo calculado; la primera vez lo de más es «Saldo inicial»). `Resumen.php` trae `fondo` | Coherencia entre lo disponible y lo invertido | Tabla nueva `fondo_inversion` |
+
+
 ## 2026-10-05 (14) · Pagado solo con el 100 % del previsto
 
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |

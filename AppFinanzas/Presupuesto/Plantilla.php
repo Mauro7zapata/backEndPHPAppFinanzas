@@ -150,6 +150,9 @@ function aplicarPlantilla($data) {
     if (!$est) { echo json_encode(['error' => "No existe el estado 'Pendiente'"]); return; }
     $idEstado = (int)$est['idEstado'];
 
+    // Un presupuesto finalizado a mano no admite gastos nuevos hasta reabrirlo.
+    if (presupuestoCerradoManual($idPresupuesto)) { echo json_encode(['error' => 'El presupuesto está finalizado. Reábrelo para agregar gastos.']); return; }
+
     // Gastos que ya existen en el presupuesto destino (evita duplicar).
     $existentes = [];
     $stmt = $mysql->prepare("SELECT g.NombreGasto, g.IdCategoria FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
@@ -185,6 +188,7 @@ function aplicarPlantilla($data) {
         $mysql->rollback();
         throw $e;
     }
+    if ($insertados > 0 || $provisiones['insertados'] > 0) evaluarCierrePresupuesto($idPresupuesto);
     echo json_encode(['insertados' => $insertados, 'omitidos' => $omitidos, 'provisiones' => $provisiones['insertados']]);
 }
 

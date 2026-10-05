@@ -3,12 +3,12 @@ require_once("../db.php");
 require_once(__DIR__ . '/../lib.php');
 
 // Función para manejar respuestas
-function enviarRespuesta($status, $message) {
+function enviarRespuesta($status, $message, $extra = []) {
     header('Content-Type: application/json');
-    echo json_encode([
+    echo json_encode(array_merge([
         "status" => $status,
         "message" => $message
-    ]);
+    ], $extra), JSON_UNESCAPED_UNICODE);
 }
 
 // Valida y normaliza los datos de un presupuesto. Devuelve [datos, error].
@@ -51,10 +51,19 @@ function insertarPresupuesto($data) {
         return;
     }
 
+    // Cierre de mes: si un mes ya terminado sigue sin finalizar, no se crean presupuestos nuevos hasta cerrarlo.
+    if ($pendiente = presupuestoPendienteDeCierre()) {
+        enviarRespuesta("error", "Antes de crear un presupuesto nuevo, finaliza el de " . nombreMesEs($pendiente['mes']) . " " . $pendiente['anho'] .
+            ": ábrelo y usa «Finalizar presupuesto», o termina de pagar y acumular sus gastos pendientes.",
+            ["bloqueado" => true, "mesPendiente" => $pendiente['mes'], "anhoPendiente" => $pendiente['anho']]);
+        return;
+    }
+
     $stmt = $mysql->prepare("INSERT INTO presupuestos (ValorPresupuesto, ExtrasMes, Anho, Mes, IdUsuario) VALUES (?, ?, ?, ?, ?)");
     $stmt->bind_param("iiiii", $d["valor"], $d["extras"], $d["anho"], $d["mes"], $uid);
 
     if ($stmt->execute()) {
+        if (presupuestosTieneEstado()) reabrirPresupuesto($mysql->insert_id); // lo deja «En curso»
         enviarRespuesta("success", "Presupuesto insertado correctamente");
     } else {
         enviarRespuesta("error", "Error al insertar el presupuesto");
@@ -120,12 +129,48 @@ function eliminarPresupuesto($idPresupuesto) {
     }
 }
 
+// Finaliza el presupuesto a mano. Si aún tiene gastos abiertos pide confirmación (status "confirmar"; reenviar con forzar=1).
+function finalizarPresupuestoManual($idPresupuesto, $forzar) {
+    $id = appfinanzas_entero($idPresupuesto);
+    if ($id === null || $id <= 0 || !appfinanzas_es_propio('presupuestos', $id)) {
+        enviarRespuesta("error", "No se encontró el presupuesto");
+        return;
+    }
+    if (!presupuestosTieneEstado()) {
+        enviarRespuesta("error", "Falta ejecutar la migración 010 en la base de datos");
+        return;
+    }
+    $r = resumenCierrePresupuesto($id);
+    if ($r['abiertos'] > 0 && !$forzar) {
+        enviarRespuesta("confirmar", "Aún hay " . $r['abiertos'] . ($r['abiertos'] == 1 ? " gasto sin pagar o acumular." : " gastos sin pagar o acumular.") .
+            " ¿Finalizar el presupuesto de todos modos?", ["abiertos" => $r['abiertos']]);
+        return;
+    }
+    finalizarPresupuesto($id, $r['abiertos'] > 0);
+    enviarRespuesta("success", "Presupuesto finalizado correctamente");
+}
+
+function reabrirPresupuestoManual($idPresupuesto) {
+    $id = appfinanzas_entero($idPresupuesto);
+    if ($id === null || $id <= 0 || !appfinanzas_es_propio('presupuestos', $id)) {
+        enviarRespuesta("error", "No se encontró el presupuesto");
+        return;
+    }
+    if (!presupuestosTieneEstado()) {
+        enviarRespuesta("error", "Falta ejecutar la migración 010 en la base de datos");
+        return;
+    }
+    reabrirPresupuesto($id);
+    enviarRespuesta("success", "Presupuesto reabierto correctamente");
+}
+
 // Consultar todos los presupuestos (lista vacía si no hay)
 function consultarPresupuestos() {
     global $mysql, $uid;
 
-    $query = "SELECT idPresupuesto, ValorPresupuesto, COALESCE(ExtrasMes, 0) AS ExtrasMes, Anho, Mes
-              FROM presupuestos WHERE IdUsuario = ? ORDER BY Anho, Mes";
+    list($selEstado, $joinEstado) = sqlEstadoPresupuesto();
+    $query = "SELECT p.idPresupuesto, p.ValorPresupuesto, COALESCE(p.ExtrasMes, 0) AS ExtrasMes, p.Anho, p.Mes, $selEstado
+              FROM presupuestos p $joinEstado WHERE p.IdUsuario = ? ORDER BY p.Anho, p.Mes";
     $stmt = $mysql->prepare($query);
     $stmt->bind_param("i", $uid);
     $stmt->execute();
@@ -144,8 +189,9 @@ function consultarPresupuestoPorMesAnho($mes, $anho) {
         return;
     }
 
-    $query = "SELECT idPresupuesto, ValorPresupuesto, COALESCE(ExtrasMes, 0) AS ExtrasMes, Anho, Mes
-              FROM presupuestos WHERE Mes = ? AND Anho = ? AND IdUsuario = ?";
+    list($selEstado, $joinEstado) = sqlEstadoPresupuesto();
+    $query = "SELECT p.idPresupuesto, p.ValorPresupuesto, COALESCE(p.ExtrasMes, 0) AS ExtrasMes, p.Anho, p.Mes, $selEstado
+              FROM presupuestos p $joinEstado WHERE p.Mes = ? AND p.Anho = ? AND p.IdUsuario = ?";
     $stmt = $mysql->prepare($query);
     $stmt->bind_param("iii", $mes, $anho, $uid);
     $stmt->execute();
@@ -196,6 +242,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         insertarPresupuesto($_POST);
     } elseif ($accion == 'editar') {
         editarPresupuesto($_POST);
+    } elseif ($accion == 'finalizar') {
+        finalizarPresupuestoManual($_POST['idPresupuesto'] ?? null, !empty($_POST['forzar']));
+    } elseif ($accion == 'reabrir') {
+        reabrirPresupuestoManual($_POST['idPresupuesto'] ?? null);
     } elseif ($accion == 'eliminar') {
         // La app envía "idPresupuesto"; se acepta también "id" por compatibilidad.
         eliminarPresupuesto($_POST['idPresupuesto'] ?? ($_POST['id'] ?? null));

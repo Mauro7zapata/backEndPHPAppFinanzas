@@ -55,12 +55,15 @@ function dias_hasta($fecha) {
 }
 
 // ------------------------------------------------------------------ presupuesto del mes
-$stmt = $mysql->prepare("SELECT idPresupuesto, ValorPresupuesto, ExtrasMes FROM presupuestos WHERE IdUsuario = ? AND Mes = ? AND Anho = ? LIMIT 1");
+list($selEstadoP, $joinEstadoP) = sqlEstadoPresupuesto();
+$stmt = $mysql->prepare("SELECT p.idPresupuesto, p.ValorPresupuesto, p.ExtrasMes, $selEstadoP FROM presupuestos p $joinEstadoP WHERE p.IdUsuario = ? AND p.Mes = ? AND p.Anho = ? LIMIT 1");
 $stmt->bind_param('iii', $uid, $mes, $anho);
 $stmt->execute();
 $p = $stmt->get_result()->fetch_assoc();
 
 $presupuesto = ['existe' => false, 'id' => null, 'valor' => 0.0, 'extras' => 0.0, 'total' => 0.0,
+    'estado' => 'En curso', 'finalizado' => false, 'cierreManual' => false, 'fechaFinalizado' => null, 'abiertos' => 0,
+    'guardado' => 0.0, 'acumulado' => 0.0, 'guardadoPrevisto' => 0.0, 'acumuladoPrevisto' => 0.0, 'acumuladoObligaciones' => 0.0,
     'previsto' => 0.0, 'pagado' => 0.0, 'ahorrado' => 0.0, 'gastadoConsumo' => 0.0, 'porPagar' => 0.0,
     'restante' => 0.0, 'libre' => 0.0, 'porcentajeUsado' => 0.0, 'porcentajeMes' => round($diaActual / $diasMes, 4),
     'gastosTotal' => 0, 'pendientes' => 0, 'enProceso' => 0, 'pagados' => 0, 'vencidos' => 0, 'valorVencido' => 0.0,
@@ -75,6 +78,11 @@ if ($p) {
     $presupuesto['valor'] = (float)$p['ValorPresupuesto'];
     $presupuesto['extras'] = (float)$p['ExtrasMes'];
     $presupuesto['total'] = $presupuesto['valor'] + $presupuesto['extras'];
+    $presupuesto['estado'] = $p['EstadoPresupuesto'];
+    $presupuesto['finalizado'] = $p['EstadoPresupuesto'] === 'Finalizado';
+    $presupuesto['cierreManual'] = (int)$p['CierreManual'] === 1;
+    $presupuesto['fechaFinalizado'] = $p['FechaFinalizado'];
+    $presupuesto['abiertos'] = resumenCierrePresupuesto($idPresupuesto)['abiertos'];
 
     $stmt = $mysql->prepare("SELECT e.NombreEstado AS estado, COUNT(*) AS n,
             COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(g.valorGastosMovimiento),0) AS pagado
@@ -87,6 +95,8 @@ if ($p) {
         $presupuesto['previsto'] += (float)$f['previsto'];
         $presupuesto['pagado'] += (float)$f['pagado'];
         if (in_array($f['estado'], ['Guardado', 'Acumulado'], true)) $presupuesto['ahorrado'] += (float)$f['pagado'];
+        if ($f['estado'] === 'Guardado') { $presupuesto['guardado'] += (float)$f['pagado']; $presupuesto['guardadoPrevisto'] += (float)$f['previsto']; }
+        if ($f['estado'] === 'Acumulado') { $presupuesto['acumulado'] += (float)$f['pagado']; $presupuesto['acumuladoPrevisto'] += (float)$f['previsto']; }
         if ($f['estado'] === 'Pendiente') $presupuesto['pendientes'] += (int)$f['n'];
         if ($f['estado'] === 'En proceso') $presupuesto['enProceso'] += (int)$f['n'];
         if ($f['estado'] === 'Pagado') $presupuesto['pagados'] += (int)$f['n'];
@@ -178,12 +188,13 @@ foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $d) {
 if ($cupoTotal > 0) $deudas['cupoUsado'] = round($cupoUsado / $cupoTotal, 4);
 
 // ------------------------------------------------------------------ obligaciones anuales
-$obligaciones = ['cantidad' => 0, 'proxima' => null, 'provisionMes' => 0.0, 'vencidas' => 0];
-$stmt = $mysql->prepare("SELECT idObligacion, Nombre, ValorEstimado, FechaVencimiento FROM obligaciones WHERE IdUsuario = ? AND Activa = 1 ORDER BY FechaVencimiento");
+$obligaciones = ['cantidad' => 0, 'proxima' => null, 'provisionMes' => 0.0, 'vencidas' => 0, 'ahorrado' => 0.0];
+$stmt = $mysql->prepare("SELECT idObligacion, Nombre, ValorEstimado, FechaVencimiento, CicloInicio FROM obligaciones WHERE IdUsuario = ? AND Activa = 1 ORDER BY FechaVencimiento");
 $stmt->bind_param('i', $uid);
 $stmt->execute();
 foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $o) {
     $obligaciones['cantidad']++;
+    $obligaciones['ahorrado'] += ahorradoObligacion($o['idObligacion'], $o['CicloInicio']);
     $d = dias_hasta($o['FechaVencimiento']);
     if ($obligaciones['proxima'] === null) {
         $obligaciones['proxima'] = ['nombre' => $o['Nombre'], 'fecha' => $o['FechaVencimiento'], 'dias' => $d, 'valor' => (float)$o['ValorEstimado']];
@@ -201,6 +212,8 @@ if ($idPresupuesto) {
     $stmt->execute();
     $obligaciones['provisionMes'] = (float)$stmt->get_result()->fetch_assoc()['t'];
 }
+
+$presupuesto['acumuladoObligaciones'] = $obligaciones['ahorrado']; // total acumulado hoy para las obligaciones (todos los meses del ciclo)
 
 // ------------------------------------------------------------------ inversiones
 $inv = invCalcularResumen($hoyTxt)['kpi'];
@@ -301,6 +314,14 @@ $registro = ['racha' => $racha, 'movimientosHoy' => $movHoy, 'movimientosMes' =>
 function pesos($v) { return '$' . number_format($v, 0, ',', '.'); }
 $nombresMes = [1 => 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 $mensajes = [];
+$cierrePendiente = presupuestoPendienteDeCierre();
+if ($cierrePendiente && !($cierrePendiente['mes'] === $mes && $cierrePendiente['anho'] === $anho)) {
+    $mensajes[] = ['emoji' => '🔒', 'titulo' => 'Finaliza el presupuesto de ' . $nombresMes[$cierrePendiente['mes']] . ' ' . $cierrePendiente['anho'],
+        'detalle' => 'Ese mes ya terminó y sigue abierto. Hasta que lo finalices no podrás crear presupuestos nuevos.', 'tono' => 'alerta',
+        'accion' => 'cerrar_mes:' . $cierrePendiente['mes'] . ':' . $cierrePendiente['anho'], 'boton' => 'Abrirlo'];
+} elseif ($cierrePendiente) {
+    $mensajes[] = ['emoji' => '🔒', 'titulo' => 'Este mes ya terminó: finalízalo', 'detalle' => 'Paga o acumula lo que falta, o usa «Finalizar presupuesto» en el menú ⋯. Así podrás crear el siguiente.', 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver presupuesto'];
+}
 if (!$presupuesto['existe']) {
     $mensajes[] = ['emoji' => '🗓️', 'titulo' => 'Empieza ' . $nombresMes[$mes] . ' con un plan', 'detalle' => 'Crea el presupuesto del mes y aplica tu plantilla de gastos frecuentes: toma menos de un minuto.', 'tono' => 'info', 'accion' => 'crear_presupuesto', 'boton' => 'Crear presupuesto'];
 }
@@ -351,4 +372,5 @@ echo json_encode([
     'presupuesto' => $presupuesto, 'categorias' => $categorias, 'tendencia' => $tendencia,
     'deudas' => $deudas, 'obligaciones' => $obligaciones, 'inversiones' => $inversiones,
     'agenda' => $agenda, 'agendaTotal' => $agendaTotal, 'registro' => $registro, 'mensajes' => $mensajes,
+    'cierrePendiente' => $cierrePendiente,
 ], JSON_UNESCAPED_UNICODE);

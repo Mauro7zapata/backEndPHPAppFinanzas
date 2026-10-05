@@ -517,12 +517,16 @@ function invCalcularResumen($hoy) {
     $porTipo = [];
     $porEstado = [];
     $lista = [];
+    $desembolsado = 0.0; $retornos = 0.0; $perdido = 0.0; // para el fondo de inversión
     $limite30 = date('Y-m-d', strtotime('+30 days', strtotime($hoy)));
 
     foreach ($inversiones as $inv) {
         $cuotas = $porInversion[(int)$inv['idInversion']] ?? [];
         $r = invResumen($inv, $cuotas, $hoy);
         $lista[] = $r;
+        $desembolsado += $r['capital'];
+        $retornos += $r['capitalCobrado'] + $r['interesCobrado'] + $r['dividendoCobrado'];
+        if (($r['estado'] ?? '') === 'Perdida') $perdido += $r['saldo'];
 
         $estado = $r['estado'] ?? 'Sin estado';
         if (!isset($porEstado[$estado])) $porEstado[$estado] = ['estado' => $estado, 'cantidad' => 0, 'capital' => 0.0];
@@ -576,9 +580,43 @@ function invCalcularResumen($hoy) {
 
     return [
         'kpi' => $kpi,
+        'fondo' => invCalcularFondo($desembolsado, $retornos, $kpi['capitalActivo'], $perdido),
         'meses' => array_values($meses),
         'porTipo' => array_values($porTipo),
         'porEstado' => array_values($porEstado),
         'inversiones' => $lista,
+    ];
+}
+
+// ---------------------------------------------------------------- Fondo de inversión (migración 011)
+// Disponible para invertir = Ingresos - Retiros + Ajustes (descuadre) + lo cobrado (capital, intereses, dividendos) - capital desembolsado.
+// Invertido = capital que sigue en la calle. El «descuadre» es la suma de los ajustes: lo que el usuario declaró distinto de lo que la app calculaba.
+// Devuelve null si la tabla aún no existe.
+function invTotalesFondo() {
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT Tipo, COALESCE(SUM(Valor), 0) AS t, COUNT(*) AS n FROM fondo_inversion WHERE IdUsuario = ? GROUP BY Tipo");
+    $stmt->bind_param('i', $uid);
+    $stmt->execute();
+    $t = ['Ingreso' => 0.0, 'Retiro' => 0.0, 'Ajuste' => 0.0, 'movimientos' => 0];
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) { $t[$f['Tipo']] = (float)$f['t']; $t['movimientos'] += (int)$f['n']; }
+    return $t;
+}
+
+function invCalcularFondo($desembolsado, $retornos, $invertido, $perdido) {
+    try {
+        $t = invTotalesFondo();
+    } catch (mysqli_sql_exception $e) {
+        return null; // migración 011 sin ejecutar
+    }
+    $disponible = round($t['Ingreso'] - $t['Retiro'] + $t['Ajuste'] + $retornos - $desembolsado, 2);
+    return [
+        'disponible' => $disponible,
+        'invertido' => round($invertido, 2),
+        'patrimonio' => round($disponible + $invertido, 2),
+        'ingresos' => $t['Ingreso'], 'retiros' => $t['Retiro'], 'descuadre' => $t['Ajuste'],
+        'cobrado' => round($retornos, 2), 'desembolsado' => round($desembolsado, 2), 'perdido' => round($perdido, 2),
+        'movimientos' => $t['movimientos'],
+        // Sin movimientos y con inversiones registradas, el disponible sale negativo: falta declarar cuánto hay (conciliar).
+        'sinConciliar' => $t['movimientos'] === 0 && $desembolsado > 0,
     ];
 }

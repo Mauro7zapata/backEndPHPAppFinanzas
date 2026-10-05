@@ -14,7 +14,7 @@ function appfinanzas_es_propio($tabla, $id) {
     global $mysql, $uid;
     static $columnas = [
         'presupuestos' => 'idPresupuesto', 'categoriagastos' => 'idCategoriaGastos', 'estados' => 'idEstado',
-        'deudas' => 'idDeuda', 'obligaciones' => 'idObligacion', 'Inversiones' => 'idInversion',
+        'deudas' => 'idDeuda', 'obligaciones' => 'idObligacion', 'Inversiones' => 'idInversion', 'lugares_guardado' => 'idLugar',
     ];
     if (!isset($columnas[$tabla])) return false;
     $id = appfinanzas_entero($id);
@@ -61,6 +61,11 @@ function appfinanzas_gasto_es_propio($idGasto) {
 // Solo toca gastos que están en Pendiente / En proceso / Pagado: los estados
 // Guardado, Acumulado y No aplica los decide el usuario y no se modifican.
 function sincronizarGasto($idGasto) {
+    sincronizarGastoEstado($idGasto);
+    evaluarCierrePorGasto($idGasto); // el presupuesto puede quedar Finalizado (o reabrirse) según cómo quedaron sus gastos
+}
+
+function sincronizarGastoEstado($idGasto) {
     global $mysql, $uid;
     $idGasto = (int)$idGasto;
     if ($idGasto <= 0) return;
@@ -228,7 +233,25 @@ function cuotaProvision($valorEstimado, $ahorrado, $fechaVencimiento, $mes, $anh
     return ceil($falta / max(1, $meses));
 }
 
-// Valor ahorrado en el ciclo actual: movimientos de los gastos de provisión desde CicloInicio.
+// true si existe la migración 012 (gastos.idLugar y tabla lugares_guardado). Así el backend funciona antes de migrar.
+function gastosTieneLugar() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gastos' AND column_name = 'idLugar'");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] > 0;
+    }
+    return $tiene;
+}
+
+// Fragmento SELECT con el lugar de guardado del gasto (alias g = gastos, p = presupuestos).
+function sqlLugarGasto() {
+    if (gastosTieneLugar()) {
+        return ", g.idLugar, (SELECT ll.Nombre FROM lugares_guardado ll WHERE ll.idLugar = g.idLugar AND ll.IdUsuario = p.IdUsuario) AS NombreLugar";
+    }
+    return ", NULL AS idLugar, NULL AS NombreLugar";
+}
+
 function obligacionesTieneAhorroInicial() {
     global $mysql;
     static $tiene = null;
@@ -239,14 +262,16 @@ function obligacionesTieneAhorroInicial() {
     return $tiene;
 }
 
-// Ahorrado del ciclo = lo ya ahorrado antes de usar la app (AhorradoInicial, migración 009) + movimientos de los gastos de provisión.
+// Ahorrado del ciclo = lo ya ahorrado antes de usar la app (AhorradoInicial, migración 009) + movimientos de los gastos
+// vinculados a la obligación que están en estado «Acumulado» (los «Pagado» son el pago de la obligación, no ahorro).
 function ahorradoObligacion($idObligacion, $cicloInicio) {
     global $mysql, $uid;
     $c = new DateTime($cicloInicio);
     $indice = (int)$c->format('Y') * 12 + (int)$c->format('n');
     $stmt = $mysql->prepare("SELECT COALESCE(SUM(g.valorGastosMovimiento), 0) AS t
         FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
-        WHERE g.idObligacion = ? AND (p.Anho * 12 + p.Mes) >= ? AND p.IdUsuario = ?");
+        INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = p.IdUsuario
+        WHERE g.idObligacion = ? AND (p.Anho * 12 + p.Mes) >= ? AND p.IdUsuario = ? AND e.NombreEstado = 'Acumulado'");
     $stmt->bind_param('iii', $idObligacion, $indice, $uid);
     $stmt->execute();
     $total = (float)$stmt->get_result()->fetch_assoc()['t'];
@@ -360,4 +385,154 @@ function periodoFinanciero($mes, $anho, $diaInicio) {
     $ini = sprintf('%04d-%02d-%02d', $ap, $mp, diaInicioEnMes($mp, $ap, $diaInicio));
     $siguiente = sprintf('%04d-%02d-%02d', $anho, $mes, diaInicioEnMes($mes, $anho, $diaInicio));
     return [$ini, date('Y-m-d', strtotime($siguiente . ' -1 day'))];
+}
+
+// ---------------------------------------------------------------- Presupuesto: estado «Finalizado» y cierre de mes
+// Un presupuesto está «En curso» o «Finalizado» (estados de tipo «Presupuestos», editables en Configuraciones).
+// Se finaliza solo cuando TODOS sus gastos quedan resueltos (pagados, no aplican, o guardados/acumulados por completo)
+// y se reabre solo si aparece un gasto abierto (salvo cierre manual). Mientras un mes ya terminado siga sin finalizar,
+// no se pueden crear presupuestos nuevos. Requiere la migración 010; sin ella todo esto se ignora.
+
+const COLORES_ESTADO_PRESUPUESTO = ['En curso' => -14575885, 'Finalizado' => -11751600];
+
+function nombreMesEs($mes) {
+    static $n = [1 => 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    return $n[(int)$mes] ?? (string)$mes;
+}
+
+function presupuestosTieneEstado() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'presupuestos' AND column_name IN ('IdEstado','FechaFinalizado','CierreManual')");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] === 3;
+    }
+    return $tiene;
+}
+
+// id del estado de tipo «Presupuestos» con ese nombre; lo crea si el usuario aún no lo tiene.
+function estadoPresupuestoPorNombre($nombre) {
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT idEstado FROM estados WHERE TipoEstado = 'Presupuestos' AND NombreEstado = ? AND IdUsuario = ? LIMIT 1");
+    $stmt->bind_param('si', $nombre, $uid);
+    $stmt->execute();
+    $f = $stmt->get_result()->fetch_assoc();
+    if ($f) return (int)$f['idEstado'];
+    $color = COLORES_ESTADO_PRESUPUESTO[$nombre] ?? -7829368;
+    $ins = $mysql->prepare("INSERT INTO estados (TipoEstado, NombreEstado, ColorEstado, IdUsuario) VALUES ('Presupuestos', ?, ?, ?)");
+    $ins->bind_param('sii', $nombre, $color, $uid);
+    $ins->execute();
+    return (int)$mysql->insert_id;
+}
+
+// Partes del SELECT/JOIN para traer el estado de un presupuesto (alias p) aunque la migración 010 no se haya ejecutado.
+function sqlEstadoPresupuesto() {
+    if (presupuestosTieneEstado()) {
+        return ["COALESCE(ep.NombreEstado, 'En curso') AS EstadoPresupuesto, p.FechaFinalizado, p.CierreManual",
+            "LEFT JOIN estados ep ON ep.idEstado = p.IdEstado AND ep.IdUsuario = p.IdUsuario"];
+    }
+    return ["'En curso' AS EstadoPresupuesto, NULL AS FechaFinalizado, 0 AS CierreManual", ""];
+}
+
+// Gastos del presupuesto y cuántos siguen sin resolver: Pendiente / En proceso, o Guardado / Acumulado sin completar su valor.
+function resumenCierrePresupuesto($idPresupuesto) {
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT COUNT(*) AS total,
+            COALESCE(SUM(CASE
+                WHEN e.NombreEstado IN ('Pendiente','En proceso') THEN 1
+                WHEN e.NombreEstado IN ('Acumulado','Guardado') AND ROUND(g.valorGastosMovimiento, 2) < ROUND(g.CostoPrevisto, 2) THEN 1
+                ELSE 0 END), 0) AS abiertos
+        FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = p.IdUsuario
+        WHERE g.idPresupuesto = ? AND p.IdUsuario = ?");
+    $stmt->bind_param('ii', $idPresupuesto, $uid);
+    $stmt->execute();
+    $f = $stmt->get_result()->fetch_assoc();
+    return ['total' => (int)$f['total'], 'abiertos' => (int)$f['abiertos']];
+}
+
+function estadoCierrePresupuesto($idPresupuesto) {
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT IdEstado, CierreManual FROM presupuestos WHERE idPresupuesto = ? AND IdUsuario = ?");
+    $stmt->bind_param('ii', $idPresupuesto, $uid);
+    $stmt->execute();
+    return $stmt->get_result()->fetch_assoc() ?: null;
+}
+
+function finalizarPresupuesto($idPresupuesto, $manual) {
+    global $mysql, $uid;
+    $fin = estadoPresupuestoPorNombre('Finalizado');
+    $hoy = date('Y-m-d'); $m = $manual ? 1 : 0;
+    $stmt = $mysql->prepare("UPDATE presupuestos SET IdEstado = ?, FechaFinalizado = ?, CierreManual = ? WHERE idPresupuesto = ? AND IdUsuario = ?");
+    $stmt->bind_param('isiii', $fin, $hoy, $m, $idPresupuesto, $uid);
+    $stmt->execute();
+}
+
+function reabrirPresupuesto($idPresupuesto) {
+    global $mysql, $uid;
+    $curso = estadoPresupuestoPorNombre('En curso');
+    $stmt = $mysql->prepare("UPDATE presupuestos SET IdEstado = ?, FechaFinalizado = NULL, CierreManual = 0 WHERE idPresupuesto = ? AND IdUsuario = ?");
+    $stmt->bind_param('iii', $curso, $idPresupuesto, $uid);
+    $stmt->execute();
+}
+
+// Finaliza o reabre el presupuesto según el estado de sus gastos. Nunca rompe la operación que lo invoca.
+function evaluarCierrePresupuesto($idPresupuesto) {
+    try {
+        $idPresupuesto = (int)$idPresupuesto;
+        if ($idPresupuesto <= 0 || !presupuestosTieneEstado()) return;
+        $p = estadoCierrePresupuesto($idPresupuesto);
+        if (!$p) return;
+        $r = resumenCierrePresupuesto($idPresupuesto);
+        $finalizado = $p['IdEstado'] !== null && (int)$p['IdEstado'] === estadoPresupuestoPorNombre('Finalizado');
+        if ($finalizado) {
+            if (!(int)$p['CierreManual'] && $r['abiertos'] > 0) reabrirPresupuesto($idPresupuesto);
+        } elseif ($r['total'] > 0 && $r['abiertos'] === 0) {
+            finalizarPresupuesto($idPresupuesto, false);
+        } elseif ($p['IdEstado'] === null) {
+            reabrirPresupuesto($idPresupuesto); // deja el estado «En curso» explícito
+        }
+    } catch (mysqli_sql_exception $e) {
+        error_log('[AppFinanzas] evaluarCierrePresupuesto: ' . $e->getMessage());
+    }
+}
+
+function evaluarCierrePorGasto($idGasto) {
+    global $mysql, $uid;
+    try {
+        if (!presupuestosTieneEstado()) return;
+        $idGasto = (int)$idGasto;
+        if ($idGasto <= 0) return;
+        $stmt = $mysql->prepare("SELECT g.idPresupuesto FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto WHERE g.idGastos = ? AND p.IdUsuario = ?");
+        $stmt->bind_param('ii', $idGasto, $uid);
+        $stmt->execute();
+        $f = $stmt->get_result()->fetch_assoc();
+        if ($f) evaluarCierrePresupuesto((int)$f['idPresupuesto']);
+    } catch (mysqli_sql_exception $e) {
+        error_log('[AppFinanzas] evaluarCierrePorGasto: ' . $e->getMessage());
+    }
+}
+
+// true si el presupuesto está finalizado por cierre manual (no admite gastos nuevos hasta reabrirlo).
+function presupuestoCerradoManual($idPresupuesto) {
+    if (!presupuestosTieneEstado()) return false;
+    $p = estadoCierrePresupuesto((int)$idPresupuesto);
+    return $p && $p['IdEstado'] !== null && (int)$p['CierreManual'] === 1 && (int)$p['IdEstado'] === estadoPresupuestoPorNombre('Finalizado');
+}
+
+// Presupuesto más antiguo cuyo mes financiero ya terminó, que tiene gastos y no está finalizado: ['mes','anho'] o null.
+function presupuestoPendienteDeCierre() {
+    global $mysql, $uid;
+    if (!presupuestosTieneEstado()) return null;
+    [$mesAct, $anhoAct] = mesFinanciero(date('Y-m-d'), parametroApp('dia_inicio_mes'));
+    $indice = $anhoAct * 12 + $mesAct;
+    $fin = estadoPresupuestoPorNombre('Finalizado');
+    $stmt = $mysql->prepare("SELECT p.idPresupuesto, p.Mes, p.Anho FROM presupuestos p
+        WHERE p.IdUsuario = ? AND p.Anho * 12 + p.Mes < ? AND (p.IdEstado IS NULL OR p.IdEstado <> ?)
+          AND EXISTS (SELECT 1 FROM gastos g WHERE g.idPresupuesto = p.idPresupuesto)
+        ORDER BY p.Anho, p.Mes LIMIT 1");
+    $stmt->bind_param('iii', $uid, $indice, $fin);
+    $stmt->execute();
+    $f = $stmt->get_result()->fetch_assoc();
+    return $f ? ['idPresupuesto' => (int)$f['idPresupuesto'], 'mes' => (int)$f['Mes'], 'anho' => (int)$f['Anho']] : null;
 }

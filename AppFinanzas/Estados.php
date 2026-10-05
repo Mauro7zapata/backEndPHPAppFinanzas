@@ -133,6 +133,12 @@ function eliminarEstado($id) {
     $stmtUso->bind_param("iiiiii", $id, $uid, $id, $uid, $id, $uid);
     $stmtUso->execute();
     $enUso = (int)$stmtUso->get_result()->fetch_assoc()['total'];
+    if (presupuestosTieneEstado()) { // migración 010: los presupuestos también tienen estado
+        $stmtP = $mysql->prepare("SELECT COUNT(*) AS total FROM presupuestos WHERE IdEstado = ? AND IdUsuario = ?");
+        $stmtP->bind_param("ii", $id, $uid);
+        $stmtP->execute();
+        $enUso += (int)$stmtP->get_result()->fetch_assoc()['total'];
+    }
     if ($enUso > 0) {
         echo "No se puede eliminar el estado porque está en uso en $enUso registro(s).";
         return;

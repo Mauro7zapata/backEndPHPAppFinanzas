@@ -9,7 +9,7 @@ define('ORDEN_ESTADO_SQL', "CASE e.NombreEstado WHEN 'Pendiente' THEN 1 WHEN 'En
 // Consultar Gastos
 function consultarGastos() {
     global $mysql, $uid;
-    $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, g.FechaPago, g.idPresupuesto, g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda
+    $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, g.FechaPago, g.idPresupuesto, g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda, (SELECT oo.Nombre FROM obligaciones oo WHERE oo.idObligacion = g.idObligacion AND oo.IdUsuario = p.IdUsuario) AS NombreObligacion" . sqlLugarGasto() . "
             FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
             INNER JOIN categoriagastos c ON g.IdCategoria = c.idCategoriaGastos AND c.IdUsuario = p.IdUsuario
             WHERE p.IdUsuario = ?
@@ -37,7 +37,10 @@ function consultarGastos() {
                 "valorGastosMovimiento" => $row['valorGastosMovimiento'],
                 "idDeuda" => $row['idDeuda'],
                 "idObligacion" => $row['idObligacion'],
-                "NombreDeuda" => $row['NombreDeuda']
+                "NombreDeuda" => $row['NombreDeuda'],
+                "NombreObligacion" => $row['NombreObligacion'],
+                "idLugar" => $row['idLugar'],
+                "NombreLugar" => $row['NombreLugar']
             ];
         }
         // Retornar los resultados como JSON
@@ -55,7 +58,7 @@ function consultarGastosPorMesYAnho($mes, $anho) {
 
     // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
-                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda
+                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda, (SELECT oo.Nombre FROM obligaciones oo WHERE oo.idObligacion = g.idObligacion AND oo.IdUsuario = p.IdUsuario) AS NombreObligacion" . sqlLugarGasto() . "
             FROM gastos g INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
             INNER JOIN categoriagastos c ON g.IdCategoria = c.idCategoriaGastos AND c.IdUsuario = p.IdUsuario
             INNER JOIN estados e ON g.IdEstado = e.idEstado AND e.IdUsuario = p.IdUsuario
@@ -100,7 +103,10 @@ function consultarGastosPorMesYAnho($mes, $anho) {
                 "valorGastosMovimiento" => $row['valorGastosMovimiento'],
                 "idDeuda" => $row['idDeuda'],
                 "idObligacion" => $row['idObligacion'],
-                "NombreDeuda" => $row['NombreDeuda']
+                "NombreDeuda" => $row['NombreDeuda'],
+                "NombreObligacion" => $row['NombreObligacion'],
+                "idLugar" => $row['idLugar'],
+                "NombreLugar" => $row['NombreLugar']
             ];
         }
     }
@@ -115,7 +121,7 @@ function consultarGastosPorIdPresupuesto($idPresupuesto) {
 
     // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
-                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda
+                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda, (SELECT oo.Nombre FROM obligaciones oo WHERE oo.idObligacion = g.idObligacion AND oo.IdUsuario = p.IdUsuario) AS NombreObligacion" . sqlLugarGasto() . "
             FROM gastos g INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
             INNER JOIN categoriagastos c ON g.IdCategoria = c.idCategoriaGastos AND c.IdUsuario = p.IdUsuario
             INNER JOIN estados e ON g.IdEstado = e.idEstado AND e.IdUsuario = p.IdUsuario
@@ -160,7 +166,10 @@ function consultarGastosPorIdPresupuesto($idPresupuesto) {
                 "valorGastosMovimiento" => $row['valorGastosMovimiento'],
                 "idDeuda" => $row['idDeuda'],
                 "idObligacion" => $row['idObligacion'],
-                "NombreDeuda" => $row['NombreDeuda']
+                "NombreDeuda" => $row['NombreDeuda'],
+                "NombreObligacion" => $row['NombreObligacion'],
+                "idLugar" => $row['idLugar'],
+                "NombreLugar" => $row['NombreLugar']
             ];
         }
     }
@@ -174,7 +183,7 @@ function consultarGastosID($id) {
     global $mysql, $uid;
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite,
                         g.Observaciones, g.IdEstado, g.IdCategoria, g.FechaPago, g.idPresupuesto,
-                        g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda
+                        g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda, (SELECT oo.Nombre FROM obligaciones oo WHERE oo.idObligacion = g.idObligacion AND oo.IdUsuario = p.IdUsuario) AS NombreObligacion" . sqlLugarGasto() . "
               FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
               WHERE g.idGastos = ? AND p.IdUsuario = ?";
     $stmt = $mysql->prepare($query);
@@ -203,7 +212,10 @@ function consultarGastosID($id) {
                     "valorGastosMovimiento" => $row['valorGastosMovimiento'],
                     "idDeuda" => $row['idDeuda'],
                     "idObligacion" => $row['idObligacion'],
-                "NombreDeuda" => $row['NombreDeuda']
+                "NombreDeuda" => $row['NombreDeuda'],
+                "NombreObligacion" => $row['NombreObligacion'],
+                "idLugar" => $row['idLugar'],
+                "NombreLugar" => $row['NombreLugar']
                 ];
             }
             // Retornar los resultados como JSON
@@ -286,6 +298,31 @@ function vincularDeudaGasto($idGasto, $data) {
     resincronizarAbonosGasto((int)$idGasto);
 }
 
+// Vincula (o desvincula) un gasto con una obligación anual (lo acumulado en ese gasto cuenta como ahorro de la obligación).
+// Solo actúa si el cliente envía "idObligacion"; 0 o vacío = sin obligación.
+function vincularObligacionGasto($idGasto, $data) {
+    global $mysql, $uid;
+    if (!array_key_exists('idObligacion', $data)) return;
+    $idObl = appfinanzas_entero($data['idObligacion']);
+    if ($idObl !== null && $idObl <= 0) $idObl = null;
+    $stmt = $mysql->prepare("UPDATE gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        SET g.idObligacion = ? WHERE g.idGastos = ? AND p.IdUsuario = ?");
+    $stmt->bind_param('iii', $idObl, $idGasto, $uid);
+    $stmt->execute();
+}
+
+// Asigna (o quita) el lugar donde está guardado lo separado del gasto. Solo actúa si el cliente envía "idLugar" y existe la migración 012.
+function asignarLugarGasto($idGasto, $data) {
+    global $mysql, $uid;
+    if (!array_key_exists('idLugar', $data) || !gastosTieneLugar()) return;
+    $idLugar = appfinanzas_entero($data['idLugar']);
+    if ($idLugar !== null && $idLugar <= 0) $idLugar = null;
+    $stmt = $mysql->prepare("UPDATE gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        SET g.idLugar = ? WHERE g.idGastos = ? AND p.IdUsuario = ?");
+    $stmt->bind_param('iii', $idLugar, $idGasto, $uid);
+    $stmt->execute();
+}
+
 // Verifica que la categoría, el estado y la deuda (si se envía) del gasto sean del usuario. Devuelve un mensaje de error o null.
 function validarPropiedadGasto($data) {
     if (!appfinanzas_es_propio('categoriagastos', $data['IdCategoria'] ?? null) || !appfinanzas_es_propio('estados', $data['IdEstado'] ?? null)) {
@@ -295,6 +332,18 @@ function validarPropiedadGasto($data) {
         $idDeuda = appfinanzas_entero($data['idDeuda']);
         if ($idDeuda !== null && $idDeuda > 0 && !appfinanzas_es_propio('deudas', $idDeuda)) {
             return "la deuda seleccionada no existe.";
+        }
+    }
+    if (array_key_exists('idObligacion', $data)) {
+        $idObl = appfinanzas_entero($data['idObligacion']);
+        if ($idObl !== null && $idObl > 0 && !appfinanzas_es_propio('obligaciones', $idObl)) {
+            return "la obligación seleccionada no existe.";
+        }
+    }
+    if (array_key_exists('idLugar', $data)) {
+        $idLugar = appfinanzas_entero($data['idLugar']);
+        if ($idLugar !== null && $idLugar > 0 && !appfinanzas_es_propio('lugares_guardado', $idLugar)) {
+            return "el lugar de guardado seleccionado no existe.";
         }
     }
     return null;
@@ -338,6 +387,11 @@ function insertarGastos($data) {
         echo "Error: No se encontró presupuesto para el mes $mes y año $anio.";
         return;
     }
+    // Un presupuesto finalizado a mano no admite gastos nuevos hasta reabrirlo.
+    if (presupuestoCerradoManual($idPresupuesto)) {
+        echo "Error: el presupuesto de " . nombreMesEs($mes) . " $anio está finalizado. Reábrelo para agregar gastos.";
+        return;
+    }
 
     // Categoría, estado y deuda deben ser del usuario.
     if ($errorPropiedad = validarPropiedadGasto($data)) {
@@ -365,7 +419,11 @@ function insertarGastos($data) {
 
     try {
         $stmt->execute();
-        vincularDeudaGasto($mysql->insert_id, $data);
+        $idNuevo = $mysql->insert_id;
+        vincularDeudaGasto($idNuevo, $data);
+        vincularObligacionGasto($idNuevo, $data);
+        asignarLugarGasto($idNuevo, $data);
+        evaluarCierrePresupuesto($idPresupuesto);
         echo "Gasto insertado correctamente.";
     } catch (mysqli_sql_exception $e) {
         error_log('[AppFinanzas] insertarGastos: ' . $e->getMessage());
@@ -421,6 +479,9 @@ function editarGastos($data) {
     try {
         $stmt->execute();
         vincularDeudaGasto($data['id'], $data);
+        vincularObligacionGasto($data['id'], $data);
+        asignarLugarGasto($data['id'], $data);
+        evaluarCierrePorGasto($data['id']);
         echo "Gasto actualizado correctamente.";
     } catch (mysqli_sql_exception $e) {
         error_log('[AppFinanzas] editarGastos: ' . $e->getMessage());
@@ -437,6 +498,11 @@ function eliminarGastos($id) {
         echo "Error: Identificador de gasto no válido.";
         return;
     }
+    // El presupuesto del gasto, para reevaluar su cierre después de borrarlo.
+    $qp = $mysql->prepare("SELECT g.idPresupuesto FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto WHERE g.idGastos = ? AND p.IdUsuario = ?");
+    $qp->bind_param("ii", $id, $uid);
+    $qp->execute();
+    $filaP = $qp->get_result()->fetch_assoc();
     $query = "DELETE g FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
               WHERE g.idGastos = ? AND p.IdUsuario = ?";
     $stmt = $mysql->prepare($query);
@@ -448,6 +514,7 @@ function eliminarGastos($id) {
 
     try {
         $stmt->execute();
+        if ($stmt->affected_rows > 0 && $filaP) evaluarCierrePresupuesto((int)$filaP['idPresupuesto']);
         echo $stmt->affected_rows > 0 ? "Gasto eliminado correctamente." : "No se encontró el gasto a eliminar.";
     } catch (mysqli_sql_exception $e) {
         if ($e->getCode() == 1451) { // violación de llave foránea: tiene movimientos
