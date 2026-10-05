@@ -16,6 +16,8 @@ function validarObligacion($d) {
     if (appfinanzas_entero($d['idCategoria'] ?? null) === null) return 'La categoría no es válida';
     if (!is_numeric($d['valorEstimado'] ?? null) || $d['valorEstimado'] <= 0 || $d['valorEstimado'] >= 1000000000) return 'El valor estimado no es válido';
     if (!appfinanzas_fecha_valida($d['fechaVencimiento'] ?? '')) return 'La fecha de vencimiento no es válida (use AAAA-MM-DD)';
+    $ini = $d['ahorradoInicial'] ?? 0;
+    if ($ini !== null && $ini !== '' && (!is_numeric($ini) || $ini < 0 || $ini >= 1000000000)) return 'El valor ya ahorrado no es válido';
     return null;
 }
 
@@ -52,6 +54,7 @@ function listarObligaciones($mes, $anho) {
             'fechaVencimiento' => $o['FechaVencimiento'],
             'diasParaVencer' => (int)$hoy->diff($venc)->format('%r%a'),
             'ahorrado' => $ahorrado,
+            'ahorradoInicial' => obligacionesTieneAhorroInicial() ? (float)$o['AhorradoInicial'] : 0.0,
             'faltante' => max(0, round((float)$o['ValorEstimado'] - $ahorrado, 2)),
             'cuotaProvision' => cuotaProvision($o['ValorEstimado'], $ahorrado, $o['FechaVencimiento'], $mes, $anho),
             'activa' => (int)$o['Activa'] === 1,
@@ -59,6 +62,16 @@ function listarObligaciones($mes, $anho) {
         ];
     }
     echo json_encode($salida, JSON_UNESCAPED_UNICODE);
+}
+
+// Avance previo al uso de la app (requiere la migración 009; sin ella se ignora).
+function guardarAhorroInicial($idObligacion, $d) {
+    global $mysql, $uid;
+    if (!obligacionesTieneAhorroInicial()) return;
+    $v = ($d['ahorradoInicial'] ?? 0) === '' ? 0 : (float)($d['ahorradoInicial'] ?? 0);
+    $q = $mysql->prepare("UPDATE obligaciones SET AhorradoInicial = ? WHERE idObligacion = ? AND IdUsuario = ?");
+    $q->bind_param('dii', $v, $idObligacion, $uid);
+    $q->execute();
 }
 
 function procesarObligacion($d) {
@@ -78,6 +91,7 @@ function procesarObligacion($d) {
                     $stmt = $mysql->prepare("INSERT INTO obligaciones (Nombre, IdCategoria, ValorEstimado, FechaVencimiento, CicloInicio, Activa, Notas, IdUsuario) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
                     $stmt->bind_param('sidssisi', $d['nombre'], $d['idCategoria'], $d['valorEstimado'], $d['fechaVencimiento'], $ciclo, $activa, $notas, $uid);
                     $stmt->execute();
+                    guardarAhorroInicial($mysql->insert_id, $d);
                     echo json_encode(['id' => $mysql->insert_id]);
                 } else {
                     $idObl = appfinanzas_entero($d['idObligacion'] ?? null);
@@ -88,6 +102,7 @@ function procesarObligacion($d) {
                     $stmt = $mysql->prepare("UPDATE obligaciones SET Nombre=?, IdCategoria=?, ValorEstimado=?, FechaVencimiento=?, Activa=?, Notas=? WHERE idObligacion=? AND IdUsuario=?");
                     $stmt->bind_param('sidsisii', $d['nombre'], $d['idCategoria'], $d['valorEstimado'], $d['fechaVencimiento'], $activa, $notas, $idObl, $uid);
                     $stmt->execute();
+                    if (array_key_exists('ahorradoInicial', $d)) guardarAhorroInicial($idObl, $d);
                     echo json_encode(['updated' => true]);
                 }
                 break;
@@ -108,7 +123,13 @@ function procesarObligacion($d) {
                 $stmt = $mysql->prepare("UPDATE obligaciones SET FechaVencimiento = DATE_ADD(FechaVencimiento, INTERVAL 1 YEAR), CicloInicio = ? WHERE idObligacion = ? AND IdUsuario = ?");
                 $stmt->bind_param('sii', $ciclo, $id, $uid);
                 $stmt->execute();
-                echo json_encode(['updated' => $stmt->affected_rows > 0]);
+                $actualizado = $stmt->affected_rows > 0;
+                if (obligacionesTieneAhorroInicial()) { // al cerrar el ciclo el avance previo se acaba
+                    $r = $mysql->prepare("UPDATE obligaciones SET AhorradoInicial = 0 WHERE idObligacion = ? AND IdUsuario = ?");
+                    $r->bind_param('ii', $id, $uid);
+                    $r->execute();
+                }
+                echo json_encode(['updated' => $actualizado]);
                 break;
 
             default:

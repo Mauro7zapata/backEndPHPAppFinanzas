@@ -159,8 +159,7 @@ function detalleDeuda($id) {
                 'mes' => $m['mesP'] !== null ? (int)$m['mesP'] : null, 'anho' => $m['anhoP'] !== null ? (int)$m['anhoP'] : null];
     }, $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
     $deuda['gastos'] = gastosVinculadosDeuda($id);
-    $deuda['categoriaSugerida'] = categoriaSugeridaDeuda($id);
-    echo json_encode($deuda, JSON_UNESCAPED_UNICODE);
+        echo json_encode($deuda, JSON_UNESCAPED_UNICODE);
 }
 
 // Gastos del presupuesto vinculados a la deuda (los más recientes primero) para asociar un abono hecho desde Deudas.
@@ -185,49 +184,6 @@ function gastosVinculadosDeuda($idDeuda, $fecha = null) {
                 'estado' => $f['NombreEstado'], 'previsto' => (float)$f['CostoPrevisto'], 'pagado' => (float)$f['valorGastosMovimiento'],
                 'sugerido' => $sugerido !== null && (int)$sugerido['idGastos'] === (int)$f['idGastos']];
     }, $filas);
-}
-
-// Categoría del último gasto vinculado a la deuda (para crear automáticamente el gasto de un abono). null si no hay.
-function categoriaSugeridaDeuda($idDeuda) {
-    global $mysql, $uid;
-    $stmt = $mysql->prepare("SELECT g.IdCategoria FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
-        WHERE g.idDeuda = ? AND p.IdUsuario = ? ORDER BY g.idGastos DESC LIMIT 1");
-    $stmt->bind_param('ii', $idDeuda, $uid);
-    $stmt->execute();
-    $f = $stmt->get_result()->fetch_assoc();
-    return $f ? (int)$f['IdCategoria'] : null;
-}
-
-// Gasto del presupuesto del mes financiero de $fecha donde reflejar un abono: reutiliza «Pago <deuda>» si ya existe
-// o lo crea (vinculado a la deuda). Devuelve su id, o null si ese mes no tiene presupuesto.
-function gastoParaAbono($idDeuda, $nombreDeuda, $idCategoria, $fecha, $valor) {
-    global $mysql, $uid;
-    [$mes, $anho] = mesFinanciero($fecha, parametroApp('dia_inicio_mes'));
-    $stmt = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE IdUsuario = ? AND Mes = ? AND Anho = ? LIMIT 1");
-    $stmt->bind_param('iii', $uid, $mes, $anho);
-    $stmt->execute();
-    $p = $stmt->get_result()->fetch_assoc();
-    if (!$p) return null;
-    $nombre = mb_substr('Pago ' . $nombreDeuda, 0, 100, 'UTF-8');
-    $stmt = $mysql->prepare("SELECT idGastos FROM gastos WHERE idPresupuesto = ? AND IdCategoria = ? AND NombreGasto = ? LIMIT 1");
-    $stmt->bind_param('iis', $p['idPresupuesto'], $idCategoria, $nombre);
-    $stmt->execute();
-    $g = $stmt->get_result()->fetch_assoc();
-    if ($g) {
-        $up = $mysql->prepare("UPDATE gastos SET idDeuda = ? WHERE idGastos = ? AND idDeuda IS NULL");
-        $up->bind_param('ii', $idDeuda, $g['idGastos']);
-        $up->execute();
-        return (int)$g['idGastos'];
-    }
-    $idEstado = estadoGastoPorNombre('Pendiente');
-    if (!$idEstado) return null;
-    $obs = 'Creado desde Deudas';
-    $sinPago = '0000-00-00';
-    $ins = $mysql->prepare("INSERT INTO gastos (NombreGasto, CostoPrevisto, CostoReal, FechaLimite, idPresupuesto, Observaciones, IdEstado, IdCategoria, FechaPago, idDeuda)
-        VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)");
-    $ins->bind_param('sdsisiisi', $nombre, $valor, $fecha, $p['idPresupuesto'], $obs, $idEstado, $idCategoria, $sinPago, $idDeuda);
-    $ins->execute();
-    return (int)$mysql->insert_id;
 }
 
 function procesarDeuda($d) {
@@ -294,23 +250,15 @@ function procesarDeuda($d) {
                 if ($d['tipo'] === 'Abono') {
                     $idGasto = array_key_exists('idGasto', $d) ? appfinanzas_entero($d['idGasto']) : null;
                     if ($idGasto !== -1 && ($idGasto === null || $idGasto <= 0)) {
+                        $vinculados = gastosVinculadosDeuda($id, $fecha);
                         if ($idGasto === null) { // sin elección del cliente: el gasto de la deuda en el mes de la fecha
-                            foreach (gastosVinculadosDeuda($id, $fecha) as $g) { if ($g['sugerido']) { $idGasto = $g['idGasto']; break; } }
+                            foreach ($vinculados as $g) { if ($g['sugerido']) { $idGasto = $g['idGasto']; break; } }
                         }
-                        if ($idGasto === null || $idGasto <= 0) { // ninguno: se crea «Pago <deuda>» en el presupuesto de ese mes
-                            $idCat = appfinanzas_entero($d['idCategoria'] ?? null);
-                            if ($idCat === null || $idCat <= 0) $idCat = categoriaSugeridaDeuda($id);
-                            $idGasto = null;
-                            if ($idCat !== null && appfinanzas_es_propio('categoriagastos', $idCat)) {
-                                $nom = $mysql->prepare("SELECT Nombre FROM deudas WHERE idDeuda = ? AND IdUsuario = ?");
-                                $nom->bind_param('ii', $id, $uid);
-                                $nom->execute();
-                                $nd = $nom->get_result()->fetch_assoc();
-                                $idGasto = gastoParaAbono($id, $nd['Nombre'], $idCat, $fecha, (float)$d['valor']);
-                                if ($idGasto === null) $avisoPresupuesto = 'No hay presupuesto de ese mes: el abono quedó solo en la deuda.';
-                            } else {
-                                $avisoPresupuesto = 'Elige una categoría para reflejar el abono en el presupuesto.';
-                            }
+                        if ($idGasto === null || $idGasto <= 0) {
+                            echo json_encode(['error' => $vinculados
+                                ? 'Elige el gasto del presupuesto al que corresponde este abono.'
+                                : 'Esta deuda aún no tiene un gasto en el presupuesto. Primero crea un gasto y vincúlalo a la deuda; luego registra el abono.']);
+                            return;
                         }
                     }
                     if ($idGasto !== null && $idGasto > 0) {
@@ -332,7 +280,8 @@ function procesarDeuda($d) {
                             sincronizarAbonoMovimiento($idMov);
                             $mysql->commit();
                         } catch (Throwable $e) { $mysql->rollback(); throw $e; }
-                        echo json_encode(['id' => $idMov, 'enPresupuesto' => true, 'gasto' => $g['NombreGasto']]);
+                        [$mp, $ap] = mesFinanciero($fecha, parametroApp('dia_inicio_mes'));
+                        echo json_encode(['id' => $idMov, 'enPresupuesto' => true, 'gasto' => $g['NombreGasto'], 'mes' => $mp, 'anho' => $ap]);
                         break;
                     }
                 }

@@ -229,6 +229,17 @@ function cuotaProvision($valorEstimado, $ahorrado, $fechaVencimiento, $mes, $anh
 }
 
 // Valor ahorrado en el ciclo actual: movimientos de los gastos de provisión desde CicloInicio.
+function obligacionesTieneAhorroInicial() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'obligaciones' AND column_name = 'AhorradoInicial'");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] > 0;
+    }
+    return $tiene;
+}
+
+// Ahorrado del ciclo = lo ya ahorrado antes de usar la app (AhorradoInicial, migración 009) + movimientos de los gastos de provisión.
 function ahorradoObligacion($idObligacion, $cicloInicio) {
     global $mysql, $uid;
     $c = new DateTime($cicloInicio);
@@ -238,7 +249,15 @@ function ahorradoObligacion($idObligacion, $cicloInicio) {
         WHERE g.idObligacion = ? AND (p.Anho * 12 + p.Mes) >= ? AND p.IdUsuario = ?");
     $stmt->bind_param('iii', $idObligacion, $indice, $uid);
     $stmt->execute();
-    return (float)$stmt->get_result()->fetch_assoc()['t'];
+    $total = (float)$stmt->get_result()->fetch_assoc()['t'];
+    if (obligacionesTieneAhorroInicial()) {
+        $q = $mysql->prepare("SELECT AhorradoInicial FROM obligaciones WHERE idObligacion = ? AND IdUsuario = ?");
+        $q->bind_param('ii', $idObligacion, $uid);
+        $q->execute();
+        $f = $q->get_result()->fetch_assoc();
+        $total += $f ? (float)$f['AhorradoInicial'] : 0.0;
+    }
+    return $total;
 }
 
 // Crea, en el presupuesto de $mes/$anho, un gasto "Acumulado" de provisión por cada obligación activa

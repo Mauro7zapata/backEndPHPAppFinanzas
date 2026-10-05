@@ -1,5 +1,20 @@
 # Changelog · Backend
 
+## 2026-10-05 (13) · Abono con gasto obligatorio y avance previo en obligaciones
+
+**SQL: `sql/009_ahorro_inicial_obligacion.sql` (idempotente; sin ella todo sigue funcionando, solo se ignora el avance previo).**
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Abono desde Deudas | `Deudas/Deudas.php` | Ya no crea gastos solo: el abono exige un gasto vinculado a la deuda (el del mes viene sugerido). Sin gastos vinculados responde «primero crea un gasto y vincúlalo a la deuda» | El usuario quiere elegir el gasto | Se retiran `gastoParaAbono`, categoría por nombre y `categoriaSugerida` |
+| Obligaciones: avance previo | `lib.php`, `Deudas/Obligaciones.php` | Campo `ahorradoInicial` (columna `AhorradoInicial`) que se suma a lo ahorrado del ciclo y alimenta la cuota de provisión; «pagar» lo reinicia a 0 | Quien ya llevaba ahorro antes de empezar a registrar | Requiere SQL 009 |
+
+## 2026-10-05 (12) · Abonos de deuda: categoría por defecto y respuesta explícita
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Categoría por defecto | `Deudas/Deudas.php` | Sin gasto previo de la deuda, se sugiere la categoría cuyo nombre sugiere deudas (Deudas, Tarjetas, Créditos, Préstamos, Financiero, Obligaciones); la respuesta del abono trae mes/año y gasto | Que el abono casi siempre quede reflejado y se sepa dónde | — |
+
 ## 2026-10-05 (11) · Tarjetas y préstamos: fechas del ciclo del mes actual
 
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
