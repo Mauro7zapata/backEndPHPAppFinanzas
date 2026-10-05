@@ -48,7 +48,44 @@ function seleccionDeuda($where = '') {
         FROM deudas d $filtro ORDER BY d.Activa DESC, d.Tipo, d.Nombre";
 }
 
+// Ocurrencia del día $dia (1-31) dentro del período [$ini, $fin] (Y-m-d), ajustando a meses cortos. null si no cae en él.
+function fechaDiaEnPeriodo($dia, $ini, $fin) {
+    if (!$dia) return null;
+    $d = new DateTime($ini); $d->modify('first day of this month');
+    for ($i = 0; $i < 3; $i++) {
+        $ultimo = (int)$d->format('t');
+        $c = sprintf('%s-%02d', $d->format('Y-m'), min((int)$dia, $ultimo));
+        if ($c >= $ini && $c <= $fin) return $c;
+        $d->modify('+1 month');
+    }
+    return null;
+}
+
+// Fechas de pago/corte que se muestran: las del mes financiero ACTUAL (el pago entra en el presupuesto de este mes aunque ya
+// haya pasado); el corte es el del ciclo que se paga (anterior al pago). 'cubierto' = ya hay abonos desde ese corte.
+function fechasCicloActual($f) {
+    global $mysql;
+    $hoyTxt = date('Y-m-d');
+    $dia = parametroApp('dia_inicio_mes');
+    [$m, $a] = mesFinanciero($hoyTxt, $dia);
+    [$ini, $fin] = periodoFinanciero($m, $a, $dia);
+    $pago = $f['DiaPago'] ? fechaDiaEnPeriodo($f['DiaPago'], $ini, $fin) : null;
+    if ($pago === null) return ['corte' => proximaFechaDia($f['DiaCorte']), 'pago' => proximaFechaDia($f['DiaPago']), 'cubierto' => false];
+    $corte = $f['DiaCorte'] ? corteAnteriorA($f['DiaCorte'], $pago) : null;
+    $cubierto = false;
+    if ($pago < $hoyTxt) {
+        $desde = $corte ?? $ini;
+        $q = $mysql->prepare("SELECT COALESCE(SUM(Valor),0) AS t FROM movimientos_deuda WHERE idDeuda = ? AND Tipo = 'Abono' AND Fecha >= ?");
+        $q->bind_param('is', $f['idDeuda'], $desde);
+        $q->execute();
+        $cubierto = (float)$q->get_result()->fetch_assoc()['t'] > 0;
+        $q->close();
+    }
+    return ['corte' => $corte, 'pago' => $pago, 'cubierto' => $cubierto];
+}
+
 function formatearDeuda($f) {
+    $ciclo = fechasCicloActual($f);
     $saldo = round((float)$f['saldoActual'], 2);
     $cupo = $f['CupoTotal'] !== null ? (float)$f['CupoTotal'] : null;
     $base = (float)$f['SaldoInicial'] + (float)$f['totalCargos'];
@@ -63,9 +100,10 @@ function formatearDeuda($f) {
         'cupoDisponible' => $cupo !== null ? round($cupo - $saldo, 2) : null,
         'diaCorte' => $f['DiaCorte'] !== null ? (int)$f['DiaCorte'] : null,
         'diaPago' => $f['DiaPago'] !== null ? (int)$f['DiaPago'] : null,
-        // El corte se muestra antes del pago: es el corte del ciclo que se paga en 'proximoPago'.
-        'proximoCorte' => $f['DiaPago'] ? corteAnteriorA($f['DiaCorte'], proximaFechaDia($f['DiaPago'])) : proximaFechaDia($f['DiaCorte']),
-        'proximoPago' => proximaFechaDia($f['DiaPago']),
+        // Ciclo del mes financiero actual: corte (anterior al pago) y pago, aunque el pago ya haya pasado.
+        'proximoCorte' => $ciclo['corte'],
+        'proximoPago' => $ciclo['pago'],
+        'pagoCubierto' => $ciclo['cubierto'],
         'tasaAnual' => $f['TasaAnual'] !== null ? (float)$f['TasaAnual'] : null,
         'cuotaMensual' => $f['CuotaMensual'] !== null ? (float)$f['CuotaMensual'] : null,
         'fechaFin' => $f['FechaFin'],
@@ -102,16 +140,26 @@ function detalleDeuda($id) {
     if (!$f) { echo json_encode(['error' => 'La deuda no existe']); return; }
     $deuda = formatearDeuda($f);
 
-    $stmt = $mysql->prepare("SELECT md.idMovDeuda, md.Tipo, md.Valor, md.Fecha, md.Nota, md.idMovimiento FROM movimientos_deuda md
+    // Los abonos hechos desde el presupuesto traen su gasto, categoría y mes (movimientos -> gastos -> presupuestos).
+    $stmt = $mysql->prepare("SELECT md.idMovDeuda, md.Tipo, md.Valor, md.Fecha, md.Nota, md.idMovimiento,
+            g.NombreGasto AS gasto, c.NombreCategoria AS categoria, p.Mes AS mesP, p.Anho AS anhoP
+        FROM movimientos_deuda md
         INNER JOIN deudas d ON d.idDeuda = md.idDeuda
+        LEFT JOIN movimientos m ON m.idMovimiento = md.idMovimiento
+        LEFT JOIN gastos g ON g.idGastos = m.idGasto
+        LEFT JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto AND p.IdUsuario = d.IdUsuario
+        LEFT JOIN categoriagastos c ON c.idCategoriaGastos = g.IdCategoria AND c.IdUsuario = d.IdUsuario
         WHERE md.idDeuda = ? AND d.IdUsuario = ? ORDER BY md.Fecha DESC, md.idMovDeuda DESC LIMIT 100");
     $stmt->bind_param('ii', $id, $uid);
     $stmt->execute();
     $deuda['movimientos'] = array_map(function ($m) {
         return ['idMovDeuda' => (int)$m['idMovDeuda'], 'tipo' => $m['Tipo'], 'valor' => (float)$m['Valor'],
-                'fecha' => $m['Fecha'], 'nota' => $m['Nota'], 'desdePresupuesto' => $m['idMovimiento'] !== null];
+                'fecha' => $m['Fecha'], 'nota' => $m['Nota'], 'desdePresupuesto' => $m['idMovimiento'] !== null,
+                'gasto' => $m['gasto'], 'categoria' => $m['categoria'],
+                'mes' => $m['mesP'] !== null ? (int)$m['mesP'] : null, 'anho' => $m['anhoP'] !== null ? (int)$m['anhoP'] : null];
     }, $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
     $deuda['gastos'] = gastosVinculadosDeuda($id);
+    $deuda['categoriaSugerida'] = categoriaSugeridaDeuda($id);
     echo json_encode($deuda, JSON_UNESCAPED_UNICODE);
 }
 
@@ -137,6 +185,49 @@ function gastosVinculadosDeuda($idDeuda, $fecha = null) {
                 'estado' => $f['NombreEstado'], 'previsto' => (float)$f['CostoPrevisto'], 'pagado' => (float)$f['valorGastosMovimiento'],
                 'sugerido' => $sugerido !== null && (int)$sugerido['idGastos'] === (int)$f['idGastos']];
     }, $filas);
+}
+
+// Categoría del último gasto vinculado a la deuda (para crear automáticamente el gasto de un abono). null si no hay.
+function categoriaSugeridaDeuda($idDeuda) {
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT g.IdCategoria FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        WHERE g.idDeuda = ? AND p.IdUsuario = ? ORDER BY g.idGastos DESC LIMIT 1");
+    $stmt->bind_param('ii', $idDeuda, $uid);
+    $stmt->execute();
+    $f = $stmt->get_result()->fetch_assoc();
+    return $f ? (int)$f['IdCategoria'] : null;
+}
+
+// Gasto del presupuesto del mes financiero de $fecha donde reflejar un abono: reutiliza «Pago <deuda>» si ya existe
+// o lo crea (vinculado a la deuda). Devuelve su id, o null si ese mes no tiene presupuesto.
+function gastoParaAbono($idDeuda, $nombreDeuda, $idCategoria, $fecha, $valor) {
+    global $mysql, $uid;
+    [$mes, $anho] = mesFinanciero($fecha, parametroApp('dia_inicio_mes'));
+    $stmt = $mysql->prepare("SELECT idPresupuesto FROM presupuestos WHERE IdUsuario = ? AND Mes = ? AND Anho = ? LIMIT 1");
+    $stmt->bind_param('iii', $uid, $mes, $anho);
+    $stmt->execute();
+    $p = $stmt->get_result()->fetch_assoc();
+    if (!$p) return null;
+    $nombre = mb_substr('Pago ' . $nombreDeuda, 0, 100, 'UTF-8');
+    $stmt = $mysql->prepare("SELECT idGastos FROM gastos WHERE idPresupuesto = ? AND IdCategoria = ? AND NombreGasto = ? LIMIT 1");
+    $stmt->bind_param('iis', $p['idPresupuesto'], $idCategoria, $nombre);
+    $stmt->execute();
+    $g = $stmt->get_result()->fetch_assoc();
+    if ($g) {
+        $up = $mysql->prepare("UPDATE gastos SET idDeuda = ? WHERE idGastos = ? AND idDeuda IS NULL");
+        $up->bind_param('ii', $idDeuda, $g['idGastos']);
+        $up->execute();
+        return (int)$g['idGastos'];
+    }
+    $idEstado = estadoGastoPorNombre('Pendiente');
+    if (!$idEstado) return null;
+    $obs = 'Creado desde Deudas';
+    $sinPago = '0000-00-00';
+    $ins = $mysql->prepare("INSERT INTO gastos (NombreGasto, CostoPrevisto, CostoReal, FechaLimite, idPresupuesto, Observaciones, IdEstado, IdCategoria, FechaPago, idDeuda)
+        VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)");
+    $ins->bind_param('sdsisiisi', $nombre, $valor, $fecha, $p['idPresupuesto'], $obs, $idEstado, $idCategoria, $sinPago, $idDeuda);
+    $ins->execute();
+    return (int)$mysql->insert_id;
 }
 
 function procesarDeuda($d) {
@@ -199,10 +290,28 @@ function procesarDeuda($d) {
                 if (!deudaDelUsuario($id)) { echo json_encode(['error' => 'La deuda no existe']); return; }
                 // Un abono se refleja en el presupuesto: se registra como movimiento del gasto vinculado a la deuda
                 // (idGasto explícito; -1 = no asociar; sin idGasto = el gasto de la deuda en el mes de la fecha, si existe).
+                $avisoPresupuesto = null;
                 if ($d['tipo'] === 'Abono') {
                     $idGasto = array_key_exists('idGasto', $d) ? appfinanzas_entero($d['idGasto']) : null;
-                    if ($idGasto === null && !array_key_exists('idGasto', $d)) {
-                        foreach (gastosVinculadosDeuda($id, $fecha) as $g) { if ($g['sugerido']) { $idGasto = $g['idGasto']; break; } }
+                    if ($idGasto !== -1 && ($idGasto === null || $idGasto <= 0)) {
+                        if ($idGasto === null) { // sin elección del cliente: el gasto de la deuda en el mes de la fecha
+                            foreach (gastosVinculadosDeuda($id, $fecha) as $g) { if ($g['sugerido']) { $idGasto = $g['idGasto']; break; } }
+                        }
+                        if ($idGasto === null || $idGasto <= 0) { // ninguno: se crea «Pago <deuda>» en el presupuesto de ese mes
+                            $idCat = appfinanzas_entero($d['idCategoria'] ?? null);
+                            if ($idCat === null || $idCat <= 0) $idCat = categoriaSugeridaDeuda($id);
+                            $idGasto = null;
+                            if ($idCat !== null && appfinanzas_es_propio('categoriagastos', $idCat)) {
+                                $nom = $mysql->prepare("SELECT Nombre FROM deudas WHERE idDeuda = ? AND IdUsuario = ?");
+                                $nom->bind_param('ii', $id, $uid);
+                                $nom->execute();
+                                $nd = $nom->get_result()->fetch_assoc();
+                                $idGasto = gastoParaAbono($id, $nd['Nombre'], $idCat, $fecha, (float)$d['valor']);
+                                if ($idGasto === null) $avisoPresupuesto = 'No hay presupuesto de ese mes: el abono quedó solo en la deuda.';
+                            } else {
+                                $avisoPresupuesto = 'Elige una categoría para reflejar el abono en el presupuesto.';
+                            }
+                        }
                     }
                     if ($idGasto !== null && $idGasto > 0) {
                         $stmt = $mysql->prepare("SELECT g.NombreGasto FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
@@ -230,7 +339,7 @@ function procesarDeuda($d) {
                 $stmt = $mysql->prepare("INSERT INTO movimientos_deuda (idDeuda, Tipo, Valor, Fecha, Nota) VALUES (?, ?, ?, ?, ?)");
                 $stmt->bind_param('isdss', $id, $d['tipo'], $d['valor'], $fecha, $nota);
                 $stmt->execute();
-                echo json_encode(['id' => $mysql->insert_id, 'enPresupuesto' => false]);
+                echo json_encode(['id' => $mysql->insert_id, 'enPresupuesto' => false, 'aviso' => $avisoPresupuesto]);
                 break;
 
             case 'eliminarMovimiento':

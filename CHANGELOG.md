@@ -1,5 +1,29 @@
 # Changelog · Backend
 
+## 2026-10-05 (11) · Tarjetas y préstamos: fechas del ciclo del mes actual
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Corte y pago del mes | `Deudas/Deudas.php` | `proximoPago` es la fecha de pago que cae en el mes financiero actual (aunque ya haya pasado) y `proximoCorte` el corte anterior a ese pago (corte 14 / pago 4: 14 sep y 4 oct). Nuevo `pagoCubierto`: el pago ya pasó y hay abonos desde el corte. Dashboard y alertas no cambian | Mostraba 14 oct y 4 nov, pero el pago de octubre entra en el presupuesto de octubre | Solo cambia lo que se muestra en Deudas |
+
+## 2026-10-05 (10) · Abonos de deuda ↔ presupuesto en ambos sentidos
+
+**Sin SQL. Subir `Deudas/Deudas.php` y `Presupuesto/Gastos.php`.**
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Abono crea su gasto | `Deudas/Deudas.php` | Si no hay gasto vinculado a la deuda en el mes del abono, se crea (o reutiliza) «Pago <deuda>» en el presupuesto de ese mes, vinculado a la deuda, con la categoría elegida (`idCategoria`; por defecto la del último gasto vinculado). Sin presupuesto de ese mes o sin categoría: el abono queda solo en la deuda y la respuesta trae `aviso` | Los abonos desde Deudas no aparecían en el presupuesto | El abono queda como movimiento del gasto (estado/valor/fecha se sincronizan) |
+| Movimientos de la deuda | `Deudas/Deudas.php` | Cada abono del presupuesto trae `gasto`, `categoria`, `mes`, `anho`; el detalle trae `categoriaSugerida` | Ver en qué presupuesto y categoría se abonó | Solo agrega campos |
+| Gastos del presupuesto | `Presupuesto/Gastos.php` | Todas las consultas devuelven `NombreDeuda` | Ver qué gastos son abonos a una deuda | Solo agrega un campo |
+
+## 2026-10-05 (9) · Sugerencias financieras (fase A: reglas, sin IA externa)
+
+**Archivo nuevo: `Inteligencia/Sugerencias.php` (crear la carpeta `Inteligencia` en el servidor). No requiere SQL.**
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Sugerencias y salud financiera | `Inteligencia/Sugerencias.php` | GET con `mes`/`anho`: hasta 7 sugerencias priorizadas (pagos vencidos, próximos 7 días, plan vs presupuesto, ritmo de gasto, categoría que más sube/baja, concentración, ahorro, uso de cupo de tarjeta, deuda más cara y costo mensual de intereses, obligación anual próxima, crear el presupuesto del mes siguiente, hábito de registro, logros) y un puntaje 0-100 con nivel y mensaje | Entender hábitos y motivar con datos reales de la app | Solo lectura; nada se envía a terceros |
+
 ## 2026-10-04 (8) · Gastos sincronizados con movimientos, abonos de deuda en el presupuesto, corte antes del pago
 
 **SQL opcional: `sql/008_sincronizar_gastos_pagados.sql` (corrige gastos ya existentes).**

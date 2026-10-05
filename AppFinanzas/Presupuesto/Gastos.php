@@ -9,7 +9,7 @@ define('ORDEN_ESTADO_SQL', "CASE e.NombreEstado WHEN 'Pendiente' THEN 1 WHEN 'En
 // Consultar Gastos
 function consultarGastos() {
     global $mysql, $uid;
-    $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, g.FechaPago, g.idPresupuesto, g.valorGastosMovimiento, g.idDeuda, g.idObligacion
+    $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, g.FechaPago, g.idPresupuesto, g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda
             FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
             INNER JOIN categoriagastos c ON g.IdCategoria = c.idCategoriaGastos AND c.IdUsuario = p.IdUsuario
             WHERE p.IdUsuario = ?
@@ -36,7 +36,8 @@ function consultarGastos() {
                 "idPresupuesto" => $row['idPresupuesto'],
                 "valorGastosMovimiento" => $row['valorGastosMovimiento'],
                 "idDeuda" => $row['idDeuda'],
-                "idObligacion" => $row['idObligacion']
+                "idObligacion" => $row['idObligacion'],
+                "NombreDeuda" => $row['NombreDeuda']
             ];
         }
         // Retornar los resultados como JSON
@@ -54,7 +55,7 @@ function consultarGastosPorMesYAnho($mes, $anho) {
 
     // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
-                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion
+                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda
             FROM gastos g INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
             INNER JOIN categoriagastos c ON g.IdCategoria = c.idCategoriaGastos AND c.IdUsuario = p.IdUsuario
             INNER JOIN estados e ON g.IdEstado = e.idEstado AND e.IdUsuario = p.IdUsuario
@@ -98,7 +99,8 @@ function consultarGastosPorMesYAnho($mes, $anho) {
                 "NombreCategoria" => $row['NombreCategoria'],
                 "valorGastosMovimiento" => $row['valorGastosMovimiento'],
                 "idDeuda" => $row['idDeuda'],
-                "idObligacion" => $row['idObligacion']
+                "idObligacion" => $row['idObligacion'],
+                "NombreDeuda" => $row['NombreDeuda']
             ];
         }
     }
@@ -113,7 +115,7 @@ function consultarGastosPorIdPresupuesto($idPresupuesto) {
 
     // Consulta SQL para seleccionar y agrupar los datos por Mes y Año
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, 
-                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion
+                    g.FechaPago,g.idPresupuesto, e.NombreEstado, c.NombreCategoria, g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda
             FROM gastos g INNER JOIN presupuestos p ON g.idPresupuesto = p.idPresupuesto
             INNER JOIN categoriagastos c ON g.IdCategoria = c.idCategoriaGastos AND c.IdUsuario = p.IdUsuario
             INNER JOIN estados e ON g.IdEstado = e.idEstado AND e.IdUsuario = p.IdUsuario
@@ -157,7 +159,8 @@ function consultarGastosPorIdPresupuesto($idPresupuesto) {
                 "NombreCategoria" => $row['NombreCategoria'],
                 "valorGastosMovimiento" => $row['valorGastosMovimiento'],
                 "idDeuda" => $row['idDeuda'],
-                "idObligacion" => $row['idObligacion']
+                "idObligacion" => $row['idObligacion'],
+                "NombreDeuda" => $row['NombreDeuda']
             ];
         }
     }
@@ -171,7 +174,7 @@ function consultarGastosID($id) {
     global $mysql, $uid;
     $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite,
                         g.Observaciones, g.IdEstado, g.IdCategoria, g.FechaPago, g.idPresupuesto,
-                        g.valorGastosMovimiento, g.idDeuda, g.idObligacion
+                        g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda
               FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
               WHERE g.idGastos = ? AND p.IdUsuario = ?";
     $stmt = $mysql->prepare($query);
@@ -199,7 +202,8 @@ function consultarGastosID($id) {
                     "idPresupuesto" => $row['idPresupuesto'],
                     "valorGastosMovimiento" => $row['valorGastosMovimiento'],
                     "idDeuda" => $row['idDeuda'],
-                    "idObligacion" => $row['idObligacion']
+                    "idObligacion" => $row['idObligacion'],
+                "NombreDeuda" => $row['NombreDeuda']
                 ];
             }
             // Retornar los resultados como JSON
