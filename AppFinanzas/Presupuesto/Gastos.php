@@ -296,6 +296,15 @@ function validarPropiedadGasto($data) {
     return null;
 }
 
+// Mensaje claro según el error de MySQL. Con 'depurar' => true en config.local.php agrega la causa real.
+function mensajeErrorGasto($accion, mysqli_sql_exception $e) {
+    $codigo = (int)$e->getCode();
+    if ($codigo === 1452) return "Error al $accion el gasto: la categoría o el estado seleccionado no existe.";
+    if ($codigo === 1062) return "Error al $accion el gasto: ya existe un gasto igual en este presupuesto.";
+    $detalle = !empty($GLOBALS['appfinanzas_depurar']) ? ' [' . $codigo . ': ' . $e->getMessage() . ']' : ' (código ' . $codigo . ')';
+    return "Error al $accion el gasto. Verifica los datos (fechas y valores)." . $detalle;
+}
+
 function insertarGastos($data) {
     global $mysql, $uid;
 
@@ -356,9 +365,7 @@ function insertarGastos($data) {
         echo "Gasto insertado correctamente.";
     } catch (mysqli_sql_exception $e) {
         error_log('[AppFinanzas] insertarGastos: ' . $e->getMessage());
-        echo $e->getCode() == 1452
-            ? "Error al insertar el gasto: la categoría o el estado seleccionado no existe."
-            : "Error al insertar el gasto. Verifica los datos (fechas y valores).";
+        echo mensajeErrorGasto("insertar", $e);
     }
 }
 
@@ -413,9 +420,7 @@ function editarGastos($data) {
         echo "Gasto actualizado correctamente.";
     } catch (mysqli_sql_exception $e) {
         error_log('[AppFinanzas] editarGastos: ' . $e->getMessage());
-        echo $e->getCode() == 1452
-            ? "Error al actualizar el gasto: la categoría o el estado seleccionado no existe."
-            : "Error al actualizar el gasto. Verifica los datos (fechas y valores).";
+        echo mensajeErrorGasto("actualizar", $e);
     }
 }
 

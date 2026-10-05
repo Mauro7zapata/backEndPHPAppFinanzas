@@ -88,3 +88,5 @@
 
 - **Prioridad por categoría + orden y agrupación del presupuesto** (`Categoria.kt`, `CategoriasActivity.kt`, `PresupuestoActivity.kt`; servidor `CategoriaGastos.php`, `sql/007_prioridad_categoria.sql`): cada categoría tiene prioridad (Alta, Media, Baja, Sin prioridad). En Presupuesto hay «Orden» (estado, prioridad, fecha límite, mayor valor) y «Agrupar por categoría» con subtotales; la elección se recuerda. Requiere ejecutar la migración 007 antes de subir CategoriaGastos.php.
 - **Inicio**: el saludo incluye el nombre del usuario («Buenas tardes, Mauro 👋»). (`InicioUi.kt`)
+
+- **Gastos: errores al guardar más claros** (`Presupuesto/Gastos.php` `mensajeErrorGasto`): el mensaje indica el código de MySQL (y la causa real con `depurar`), y avisa si el gasto ya existe en el presupuesto.
