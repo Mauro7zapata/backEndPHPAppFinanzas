@@ -1,5 +1,11 @@
 # Changelog · Backend
 
+## 2026-10-05 (14) · Pagado solo con el 100 % del previsto
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Estado por movimientos | `lib.php`, `sql/008_sincronizar_gastos_pagados.sql` | `UMBRAL_PAGADO` pasa de 0,95 a 1,0: un gasto queda Pagado solo cuando el total de movimientos es igual o mayor al previsto; antes, desde el 95 % | Criterio del usuario | Gastos entre 95 % y 99 % vuelven a «En proceso» al sincronizarse |
+
 ## 2026-10-05 (13) · Abono con gasto obligatorio y avance previo en obligaciones
 
 **SQL: `sql/009_ahorro_inicial_obligacion.sql` (idempotente; sin ella todo sigue funcionando, solo se ignora el avance previo).**

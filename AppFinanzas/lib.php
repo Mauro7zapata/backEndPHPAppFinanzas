@@ -2,8 +2,8 @@
 // Lógica compartida entre los endpoints (Movimientos, Gastos, Plantilla, Deudas, Obligaciones, Alertas).
 // Este archivo solo define funciones: no ejecuta nada por sí mismo. Requiere que db.php ya esté cargado.
 
-// Porcentaje del costo previsto a partir del cual un gasto se considera pagado.
-const UMBRAL_PAGADO = 0.95;
+// Fracción del costo previsto a partir de la cual un gasto se considera pagado: el total de movimientos debe igualar o superar el previsto.
+const UMBRAL_PAGADO = 1.0;
 
 // ---------------------------------------------------------------- Aislamiento por usuario
 // Todas las funciones de este archivo trabajan sobre el usuario autenticado ($uid, definido en db.php).
@@ -55,8 +55,8 @@ function appfinanzas_gasto_es_propio($idGasto) {
 }
 
 // Ajusta el estado del gasto según lo ya abonado mediante movimientos.
-//  - suma >= 95% del costo previsto  -> Pagado (y se registra la fecha de pago)
-//  - suma > 0 y < 95%                -> En proceso
+//  - suma >= costo previsto  -> Pagado (y se registra la fecha de pago)
+//  - suma > 0 y < costo previsto     -> En proceso
 //  - suma = 0 (se borraron los movimientos) -> vuelve a Pendiente
 // Solo toca gastos que están en Pendiente / En proceso / Pagado: los estados
 // Guardado, Acumulado y No aplica los decide el usuario y no se modifican.
@@ -80,7 +80,7 @@ function sincronizarGasto($idGasto) {
     $previsto = (float)$g['CostoPrevisto'];
     if ($total <= 0) {
         $nuevo = 'Pendiente';
-    } elseif ($previsto > 0 && $total >= $previsto * UMBRAL_PAGADO) {
+    } elseif ($previsto > 0 && round($total, 2) >= round($previsto * UMBRAL_PAGADO, 2)) {
         $nuevo = 'Pagado';
     } else {
         $nuevo = 'En proceso';
