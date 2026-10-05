@@ -1,5 +1,8 @@
 # Changelog · Backend
 
+## 2026-10-05 (17) · Aviso «Vas rápido» con proyección realista
+- `Inicio/Dashboard.php`: `proyeccionCierre` = pagado + por pagar (compromisos reales) en vez de extrapolar por días, que inflaba el cierre cuando los pagos grandes caen a inicio de mes. El aviso ahora tiene tres versiones: «Vas rápido» (el cierre supera el presupuesto, indica cuánto), «Vas ajustado» (≥ 90 %) y «Pagaste temprano» (informativo, dentro del presupuesto). No incluye gastos nuevos aún no registrados. Solo sube `Inicio/Dashboard.php`; la app no cambia.
+
 ## 2026-10-05 (16) · Lugares de guardado (catálogo) para Guardado/Acumulado
 **Requiere ejecutar `sql/012_lugares_guardado.sql` (con respaldo).** Antes de migrar todo sigue funcionando (el selector simplemente no aparece).
 - `sql/012_lugares_guardado.sql`: tabla `lugares_guardado` (por usuario, nombre único) con 4 lugares de ejemplo por usuario y columna `gastos.idLugar` (FK `ON DELETE SET NULL`).

@@ -110,8 +110,11 @@ if ($p) {
         if ($presupuesto['diasRestantes'] >= 0 && $presupuesto['restante'] > 0) {
             $presupuesto['gastoDiarioDisponible'] = round($presupuesto['restante'] / ($presupuesto['diasRestantes'] + 1));
         }
-        if ($diaActual >= 5 && $presupuesto['pagado'] > 0) {
-            $presupuesto['proyeccionCierre'] = round($presupuesto['pagado'] / $diaActual * $diasMes);
+        // Cierre estimado = lo ya pagado + lo que falta por pagar de los gastos previstos (compromisos reales).
+        // No se extrapola por días: los pagos grandes (arriendo, cuotas) suelen caer al inicio del mes y inflarían la cifra.
+        // No incluye gastos nuevos que aún no has registrado.
+        if ($presupuesto['pagado'] > 0 || $presupuesto['previsto'] > 0) {
+            $presupuesto['proyeccionCierre'] = round($presupuesto['pagado'] + $presupuesto['porPagar']);
         }
     }
 
@@ -348,7 +351,15 @@ if ($presupuesto['existe'] && $presupuesto['total'] > 0) {
     } elseif (($umbral = parametroApp('porcentaje_alerta_presupuesto')) > 0 && $uso * 100 >= $umbral) {
         $mensajes[] = ['emoji' => '⚠️', 'titulo' => 'Ya usaste el ' . round($uso * 100) . '% del presupuesto', 'detalle' => 'Tu aviso está en ' . $umbral . '%. Te quedan ' . pesos(max(0, $presupuesto['total'] - $presupuesto['pagado'])) . ' para el resto del mes.', 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver presupuesto'];
     } elseif ($esMesActual && $diaActual >= 5 && $uso > $presupuesto['porcentajeMes'] + 0.15) {
-        $mensajes[] = ['emoji' => '📈', 'titulo' => 'Vas rápido: ' . round($uso * 100) . '% del presupuesto en el ' . round($presupuesto['porcentajeMes'] * 100) . '% del mes', 'detalle' => 'Si sigues a este ritmo cerrarías cerca de ' . pesos($presupuesto['proyeccionCierre'] ?? 0) . '.', 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver detalle'];
+        $cierre = (float)($presupuesto['proyeccionCierre'] ?? $presupuesto['pagado']);
+        $titulo = round($uso * 100) . '% del presupuesto en el ' . round($presupuesto['porcentajeMes'] * 100) . '% del mes';
+        if ($cierre > $presupuesto['total']) {
+            $mensajes[] = ['emoji' => '📈', 'titulo' => 'Vas rápido: ' . $titulo, 'detalle' => 'Con lo ya pagado y lo que te falta por pagar (' . pesos($presupuesto['porPagar']) . ') cerrarías cerca de ' . pesos($cierre) . ', ' . pesos($cierre - $presupuesto['total']) . ' por encima de tu presupuesto.', 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver detalle'];
+        } elseif ($cierre > $presupuesto['total'] * 0.9) {
+            $mensajes[] = ['emoji' => '📈', 'titulo' => 'Vas ajustado: ' . $titulo, 'detalle' => 'Con lo que te falta por pagar (' . pesos($presupuesto['porPagar']) . ') cerrarías cerca de ' . pesos($cierre) . ', casi todo tu presupuesto. Cualquier gasto nuevo te haría pasar.', 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver detalle'];
+        } else {
+            $mensajes[] = ['emoji' => '🧾', 'titulo' => 'Pagaste temprano: ' . $titulo, 'detalle' => 'Es normal si ya pagaste lo grande. Con lo que te falta por pagar (' . pesos($presupuesto['porPagar']) . ') cerrarías cerca de ' . pesos($cierre) . ', dentro de tu presupuesto.', 'tono' => 'info', 'accion' => 'ver_presupuesto', 'boton' => 'Ver detalle'];
+        }
     } elseif ($esMesActual && $diaActual >= 5 && $presupuesto['pagado'] > 0 && $uso <= $presupuesto['porcentajeMes']) {
         $mensajes[] = ['emoji' => '👏', 'titulo' => 'Vas por buen camino', 'detalle' => 'Llevas el ' . round($uso * 100) . '% del presupuesto y el mes va en el ' . round($presupuesto['porcentajeMes'] * 100) . '%.', 'tono' => 'ok', 'accion' => 'ver_presupuesto', 'boton' => 'Ver presupuesto'];
     }
