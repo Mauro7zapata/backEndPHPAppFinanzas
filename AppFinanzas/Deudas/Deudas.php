@@ -63,7 +63,8 @@ function formatearDeuda($f) {
         'cupoDisponible' => $cupo !== null ? round($cupo - $saldo, 2) : null,
         'diaCorte' => $f['DiaCorte'] !== null ? (int)$f['DiaCorte'] : null,
         'diaPago' => $f['DiaPago'] !== null ? (int)$f['DiaPago'] : null,
-        'proximoCorte' => proximaFechaDia($f['DiaCorte']),
+        // El corte se muestra antes del pago: es el corte del ciclo que se paga en 'proximoPago'.
+        'proximoCorte' => $f['DiaPago'] ? corteAnteriorA($f['DiaCorte'], proximaFechaDia($f['DiaPago'])) : proximaFechaDia($f['DiaCorte']),
         'proximoPago' => proximaFechaDia($f['DiaPago']),
         'tasaAnual' => $f['TasaAnual'] !== null ? (float)$f['TasaAnual'] : null,
         'cuotaMensual' => $f['CuotaMensual'] !== null ? (float)$f['CuotaMensual'] : null,
@@ -110,7 +111,32 @@ function detalleDeuda($id) {
         return ['idMovDeuda' => (int)$m['idMovDeuda'], 'tipo' => $m['Tipo'], 'valor' => (float)$m['Valor'],
                 'fecha' => $m['Fecha'], 'nota' => $m['Nota'], 'desdePresupuesto' => $m['idMovimiento'] !== null];
     }, $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
+    $deuda['gastos'] = gastosVinculadosDeuda($id);
     echo json_encode($deuda, JSON_UNESCAPED_UNICODE);
+}
+
+// Gastos del presupuesto vinculados a la deuda (los más recientes primero) para asociar un abono hecho desde Deudas.
+// 'sugerido' = gasto del mes financiero de $fecha (prefiere el que aún no está pagado).
+function gastosVinculadosDeuda($idDeuda, $fecha = null) {
+    global $mysql, $uid;
+    $stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento, e.NombreEstado, p.Mes, p.Anho
+        FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        INNER JOIN estados e ON e.idEstado = g.IdEstado
+        WHERE g.idDeuda = ? AND p.IdUsuario = ? ORDER BY p.Anho DESC, p.Mes DESC, g.idGastos DESC LIMIT 12");
+    $stmt->bind_param('ii', $idDeuda, $uid);
+    $stmt->execute();
+    $filas = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    [$mes, $anho] = mesFinanciero($fecha ?: date('Y-m-d'), parametroApp('dia_inicio_mes'));
+    $sugerido = null;
+    foreach ($filas as $f) {
+        if ((int)$f['Mes'] !== $mes || (int)$f['Anho'] !== $anho) continue;
+        if ($sugerido === null || ($sugerido['NombreEstado'] === 'Pagado' && $f['NombreEstado'] !== 'Pagado')) $sugerido = $f;
+    }
+    return array_map(function ($f) use ($sugerido) {
+        return ['idGasto' => (int)$f['idGastos'], 'nombre' => $f['NombreGasto'], 'mes' => (int)$f['Mes'], 'anho' => (int)$f['Anho'],
+                'estado' => $f['NombreEstado'], 'previsto' => (float)$f['CostoPrevisto'], 'pagado' => (float)$f['valorGastosMovimiento'],
+                'sugerido' => $sugerido !== null && (int)$sugerido['idGastos'] === (int)$f['idGastos']];
+    }, $filas);
 }
 
 function procesarDeuda($d) {
@@ -171,10 +197,40 @@ function procesarDeuda($d) {
                 if (!appfinanzas_fecha_valida($fecha)) { echo json_encode(['error' => 'La fecha no es válida (use AAAA-MM-DD)']); return; }
                 $nota = $d['nota'] ?? null;
                 if (!deudaDelUsuario($id)) { echo json_encode(['error' => 'La deuda no existe']); return; }
+                // Un abono se refleja en el presupuesto: se registra como movimiento del gasto vinculado a la deuda
+                // (idGasto explícito; -1 = no asociar; sin idGasto = el gasto de la deuda en el mes de la fecha, si existe).
+                if ($d['tipo'] === 'Abono') {
+                    $idGasto = array_key_exists('idGasto', $d) ? appfinanzas_entero($d['idGasto']) : null;
+                    if ($idGasto === null && !array_key_exists('idGasto', $d)) {
+                        foreach (gastosVinculadosDeuda($id, $fecha) as $g) { if ($g['sugerido']) { $idGasto = $g['idGasto']; break; } }
+                    }
+                    if ($idGasto !== null && $idGasto > 0) {
+                        $stmt = $mysql->prepare("SELECT g.NombreGasto FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+                            WHERE g.idGastos = ? AND g.idDeuda = ? AND p.IdUsuario = ?");
+                        $stmt->bind_param('iii', $idGasto, $id, $uid);
+                        $stmt->execute();
+                        $g = $stmt->get_result()->fetch_assoc();
+                        if (!$g) { echo json_encode(['error' => 'El gasto no está vinculado a esta deuda']); return; }
+                        $mysql->begin_transaction();
+                        try {
+                            $tipoMov = 'Gasto';
+                            $obs = trim((string)$nota) !== '' ? mb_substr(trim($nota), 0, 500, 'UTF-8') : 'Abono registrado desde Deudas';
+                            $ins = $mysql->prepare("INSERT INTO movimientos (tipoMovimiento, valorMovimiento, nombreGasto, observacionMovimiento, fechaMovimiento, idGasto) VALUES (?, ?, ?, ?, ?, ?)");
+                            $ins->bind_param('sdsssi', $tipoMov, $d['valor'], $g['NombreGasto'], $obs, $fecha, $idGasto);
+                            $ins->execute();
+                            $idMov = $mysql->insert_id;
+                            sincronizarGasto($idGasto);
+                            sincronizarAbonoMovimiento($idMov);
+                            $mysql->commit();
+                        } catch (Throwable $e) { $mysql->rollback(); throw $e; }
+                        echo json_encode(['id' => $idMov, 'enPresupuesto' => true, 'gasto' => $g['NombreGasto']]);
+                        break;
+                    }
+                }
                 $stmt = $mysql->prepare("INSERT INTO movimientos_deuda (idDeuda, Tipo, Valor, Fecha, Nota) VALUES (?, ?, ?, ?, ?)");
                 $stmt->bind_param('isdss', $id, $d['tipo'], $d['valor'], $fecha, $nota);
                 $stmt->execute();
-                echo json_encode(['id' => $mysql->insert_id]);
+                echo json_encode(['id' => $mysql->insert_id, 'enPresupuesto' => false]);
                 break;
 
             case 'eliminarMovimiento':

@@ -85,16 +85,19 @@ function sincronizarGasto($idGasto) {
     } else {
         $nuevo = 'En proceso';
     }
-    if ($nuevo === $g['NombreEstado']) return;
-
     $est = estadoGastoPorNombre($nuevo);
     if (!$est) return;
 
+    // Con movimientos, el valor pagado (CostoReal) siempre es el total registrado; pagado => fecha del último movimiento.
+    // "En proceso" arranca desde el primer movimiento. Sin movimientos solo se revierte el estado (no se toca CostoReal).
     if ($nuevo === 'Pagado') {
-        $stmt = $mysql->prepare("UPDATE gastos SET IdEstado = ?, FechaPago = ? WHERE idGastos = ?");
-        $fecha = $g['ultima'];
-        $stmt->bind_param('isi', $est, $fecha, $idGasto);
+        $stmt = $mysql->prepare("UPDATE gastos SET IdEstado = ?, CostoReal = ?, FechaPago = ? WHERE idGastos = ?");
+        $stmt->bind_param('idsi', $est, $total, $g['ultima'], $idGasto);
+    } elseif ($nuevo === 'En proceso') {
+        $stmt = $mysql->prepare("UPDATE gastos SET IdEstado = ?, CostoReal = ? WHERE idGastos = ?");
+        $stmt->bind_param('idi', $est, $total, $idGasto);
     } else {
+        if ($nuevo === $g['NombreEstado']) return;
         $stmt = $mysql->prepare("UPDATE gastos SET IdEstado = ? WHERE idGastos = ?");
         $stmt->bind_param('ii', $est, $idGasto);
     }
@@ -195,6 +198,21 @@ function proximaFechaDia($dia, $desde = null) {
         $ultimo = (int)date('t', mktime(0, 0, 0, $mes, 1, $anho));
         $f = new DateTime(sprintf('%04d-%02d-%02d', $anho, $mes, min((int)$dia, $ultimo)));
         if ($f >= $hoy) return $f->format('Y-m-d');
+    }
+    return null;
+}
+
+// Corte del ciclo que se paga en $fechaPago: el último corte estrictamente anterior a esa fecha
+// (corte 15 y pago 5 -> pago 5 oct se refiere al corte del 15 sep). null si no hay día de corte.
+function corteAnteriorA($diaCorte, $fechaPago) {
+    if (!$diaCorte || !$fechaPago) return null;
+    $p = new DateTime($fechaPago);
+    $mes = (int)$p->format('n'); $anho = (int)$p->format('Y');
+    for ($i = 0; $i < 2; $i++) {
+        $ultimo = (int)date('t', mktime(0, 0, 0, $mes, 1, $anho));
+        $c = new DateTime(sprintf('%04d-%02d-%02d', $anho, $mes, min((int)$diaCorte, $ultimo)));
+        if ($c < $p) return $c->format('Y-m-d');
+        $mes--; if ($mes < 1) { $mes = 12; $anho--; }
     }
     return null;
 }

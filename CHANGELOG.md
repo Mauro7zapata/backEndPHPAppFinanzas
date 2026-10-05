@@ -1,5 +1,15 @@
 # Changelog · Backend
 
+## 2026-10-04 (8) · Gastos sincronizados con movimientos, abonos de deuda en el presupuesto, corte antes del pago
+
+**SQL opcional: `sql/008_sincronizar_gastos_pagados.sql` (corrige gastos ya existentes).**
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Gasto pagado por movimientos | `lib.php` (`sincronizarGasto`) | Siempre fija CostoReal = total de movimientos; Pagado ⇒ FechaPago = último movimiento; En proceso desde el primer movimiento (antes solo cambiaba si el estado cambiaba) | El valor y la fecha no se actualizaban al seguir abonando | Gastos coherentes con sus movimientos |
+| Abono desde Deudas | `Deudas/Deudas.php` | El abono se registra como movimiento del gasto vinculado (`idGasto`, -1 = no asociar, ausente = gasto del mes); el detalle trae `gastos` | Los abonos hechos desde Deuda no aparecían en el presupuesto | Abono visible en Presupuesto/Movimientos |
+| Corte de tarjeta | `lib.php` (`corteAnteriorA`), `Deudas/Deudas.php` | `proximoCorte` = corte del ciclo que se paga en `proximoPago` (15 sep → pago 5 oct) | Mostraba el corte posterior al pago | Solo cambia la fecha mostrada (las alertas de corte no cambian) |
+
 ## 2026-10-04 (7) · Fix: no se podía guardar un gasto sin fecha de pago
 
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
