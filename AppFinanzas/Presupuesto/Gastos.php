@@ -314,8 +314,8 @@ function insertarGastos($data) {
         return;
     }
 
-    // FechaPago vacía = sin pago: se guarda NULL (antes quedaba '0000-00-00').
-    if (!isset($data['FechaPago']) || $data['FechaPago'] === '' || $data['FechaPago'] === '0000-00-00') { $data['FechaPago'] = null; }
+    // FechaPago vacía = sin pago: la columna es NOT NULL, se guarda '0000-00-00'.
+    if (!isset($data['FechaPago']) || $data['FechaPago'] === '' || $data['FechaPago'] === '0000-00-00') { $data['FechaPago'] = '0000-00-00'; }
 
     // Consultar idPresupuesto
     $mes = $data['Mes'] ?? null;
@@ -380,8 +380,8 @@ function editarGastos($data) {
         return;
     }
 
-    // FechaPago vacía = sin pago: se guarda NULL (antes quedaba '0000-00-00').
-    if (!isset($data['FechaPago']) || $data['FechaPago'] === '' || $data['FechaPago'] === '0000-00-00') { $data['FechaPago'] = null; }
+    // FechaPago vacía = sin pago: la columna es NOT NULL, se guarda '0000-00-00'.
+    if (!isset($data['FechaPago']) || $data['FechaPago'] === '' || $data['FechaPago'] === '0000-00-00') { $data['FechaPago'] = '0000-00-00'; }
 
     // El gasto, la categoría, el estado y la deuda deben ser del usuario.
     if (!appfinanzas_gasto_es_propio($data['id'])) {

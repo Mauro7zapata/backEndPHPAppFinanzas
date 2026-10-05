@@ -1,5 +1,11 @@
 # Changelog · Backend
 
+## 2026-10-04 (7) · Fix: no se podía guardar un gasto sin fecha de pago
+
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Guardar/editar gasto | `Presupuesto/Gastos.php` | Sin fecha de pago se guarda `'0000-00-00'` (como antes) en vez de NULL | `gastos.FechaPago` es NOT NULL (error 1048) | Ya no falla; no requiere SQL |
+
 ## 2026-10-04 (6) · Inicio: muestra el último presupuesto creado
 
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
