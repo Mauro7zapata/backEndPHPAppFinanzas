@@ -78,7 +78,7 @@ $cats = []; $catsAnt = [];
 if ($p) {
     $idP = (int)$p['idPresupuesto'];
     $total = (float)$p['total'];
-    $s = $mysql->prepare("SELECT e.NombreEstado AS estado, COUNT(*) AS n, COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(g.valorGastosMovimiento),0) AS pagado
+    $s = $mysql->prepare("SELECT e.NombreEstado AS estado, COUNT(*) AS n, COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(" . sqlValorEfectivoGasto() . "),0) AS pagado
         FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = ? WHERE g.idPresupuesto = ? GROUP BY e.NombreEstado");
     $s->bind_param('ii', $uid, $idP); $s->execute();
     foreach ($s->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {

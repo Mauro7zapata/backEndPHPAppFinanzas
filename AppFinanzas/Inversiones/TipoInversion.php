@@ -8,6 +8,13 @@ function procesarTipoInversion($data) {
 
     $accion = isset($data['accion']) ? $data['accion'] : '';
 
+    // El catálogo de tipos es del sistema y lo comparten todos los usuarios (el código depende de sus ids):
+    // ningún usuario puede crearlo, cambiarlo ni borrarlo desde la API. Se mantiene con sql/016.
+    if (in_array($accion, ['crear', 'actualizar', 'eliminar'], true)) {
+        echo json_encode(['error' => 'El catálogo de tipos de inversión es del sistema y no se puede modificar']);
+        return;
+    }
+
     try {
         switch ($accion) {
             case 'crear':

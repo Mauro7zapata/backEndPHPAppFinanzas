@@ -252,6 +252,12 @@ function sqlLugarGasto() {
     return ", NULL AS idLugar, NULL AS NombreLugar";
 }
 
+// Valor que cuenta un gasto en el dashboard: Guardado ya está apartado aunque no tenga movimientos (cuenta lo previsto,
+// o los movimientos si son mayores); los demás estados cuentan solo sus movimientos reales.
+function sqlValorEfectivoGasto($g = 'g', $e = 'e') {
+    return "(CASE WHEN $e.NombreEstado = 'Guardado' THEN GREATEST($g.valorGastosMovimiento, $g.CostoPrevisto) ELSE $g.valorGastosMovimiento END)";
+}
+
 // true si existe la tabla separado_usos (migración 014). Sin ella el saldo separado = lo aportado.
 function separadoTieneUsos() {
     global $mysql;
@@ -271,7 +277,7 @@ function saldoSeparadoPorLugar() {
     $vacio = function () { return ['guardado' => 0.0, 'acumulado' => 0.0, 'usado' => 0.0, 'ajuste' => 0.0, 'gastos' => 0, 'saldo' => 0.0]; };
     $lugares = [];
     $colLugar = gastosTieneLugar() ? "COALESCE(g.idLugar, 0)" : "0";
-    $q = $mysql->prepare("SELECT $colLugar AS l, e.NombreEstado AS est, COALESCE(SUM(g.valorGastosMovimiento), 0) AS t, COUNT(*) AS n
+    $q = $mysql->prepare("SELECT $colLugar AS l, e.NombreEstado AS est, COALESCE(SUM(" . sqlValorEfectivoGasto() . "), 0) AS t, COUNT(*) AS n
         FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
         INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = p.IdUsuario
         WHERE p.IdUsuario = ? AND e.NombreEstado IN ('Guardado', 'Acumulado') GROUP BY l, e.NombreEstado");
@@ -493,7 +499,7 @@ function resumenCierrePresupuesto($idPresupuesto) {
     $stmt = $mysql->prepare("SELECT COUNT(*) AS total,
             COALESCE(SUM(CASE
                 WHEN e.NombreEstado IN ('Pendiente','En proceso') THEN 1
-                WHEN e.NombreEstado IN ('Acumulado','Guardado') AND ROUND(g.valorGastosMovimiento, 2) < ROUND(g.CostoPrevisto, 2) THEN 1
+                WHEN e.NombreEstado = 'Acumulado' AND ROUND(g.valorGastosMovimiento, 2) < ROUND(g.CostoPrevisto, 2) THEN 1
                 ELSE 0 END), 0) AS abiertos
         FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
         INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = p.IdUsuario

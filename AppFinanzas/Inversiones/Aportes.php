@@ -80,6 +80,7 @@ try {
         case 'actualizar':
             $a = aporteDelUsuario(appfinanzas_entero($d['idAporte'] ?? null) ?? 0);
             if (!$a) { echo json_encode(['error' => 'El aporte no existe']); break; }
+            if (!empty($a['idPlan'])) { echo json_encode(['error' => 'Este aporte es la reinversión de un dividendo: cámbialo desde el dividendo (cuota)'], JSON_UNESCAPED_UNICODE); break; }
             if ($e = validarAporte($d)) { echo json_encode(['error' => $e]); break; }
             $valor = round((float)$d['valor'], 2); $fecha = $d['fecha'];
             $obs = invObservacion($d['observaciones'] ?? null);
@@ -98,6 +99,7 @@ try {
         case 'eliminar':
             $a = aporteDelUsuario(appfinanzas_entero($d['idAporte'] ?? null) ?? 0);
             if (!$a) { echo json_encode(['error' => 'El aporte no existe']); break; }
+            if (!empty($a['idPlan'])) { echo json_encode(['error' => 'Este aporte es la reinversión de un dividendo: cámbialo desde el dividendo (cuota)'], JSON_UNESCAPED_UNICODE); break; }
             $idAporte = (int)$a['idAporte'];
             $mysql->begin_transaction();
             try {

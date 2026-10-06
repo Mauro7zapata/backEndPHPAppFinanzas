@@ -52,6 +52,31 @@ function invRedondear($v, $inv) {
     return round($v, (($inv['Moneda'] ?? 'COP') === 'USD') ? 2 : 0);
 }
 
+// Migración 015: valor actual (saldo de la plataforma) de las acciones.
+function invTieneValor() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'Inversiones' AND column_name = 'ValorActual'")
+           ?: null;
+        $t = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'valoraciones_inversion'");
+        $tiene = $r && $t && (int)$r->fetch_assoc()['n'] > 0 && (int)$t->fetch_assoc()['n'] > 0;
+    }
+    return $tiene;
+}
+
+// Migración 015: reinversión de dividendos (PlanPagos.Reinvertido y aportes_inversion.idPlan).
+function invTieneReinversion() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE()
+            AND ((table_name = 'PlanPagos' AND column_name = 'Reinvertido') OR (table_name = 'aportes_inversion' AND column_name = 'idPlan'))");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] >= 2;
+    }
+    return $tiene;
+}
+
 function invFondoTieneMoneda() {
     global $mysql;
     static $tiene = null;
@@ -323,7 +348,7 @@ function invGuardarObservacion($idPlan, $texto, $anexar = true) {
 
 // Marca una cuota como cobrada. Ajusta importes si se envían. Liquida la inversión si ya no queda nada por cobrar.
 // Devuelve null si la cuota no existe; si no, ['cobrada' => true, 'liquidada' => bool].
-function invCobrarCuota($idPlan, $fecha = null, $interes = null, $capital = null, $dividendo = null, $observaciones = null) {
+function invCobrarCuota($idPlan, $fecha = null, $interes = null, $capital = null, $dividendo = null, $observaciones = null, $reinvertir = null) {
     global $mysql, $uid;
     $stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.InteresPagado, p.CapitalPagado, p.DividendoPagado FROM PlanPagos p
         INNER JOIN Inversiones i ON i.idInversion = p.idInversion WHERE p.idPlan = ? AND i.IdUsuario = ?");
@@ -344,8 +369,67 @@ function invCobrarCuota($idPlan, $fecha = null, $interes = null, $capital = null
     $stmt->execute();
     $obs = invObservacion($observaciones);
     if ($obs !== null) invGuardarObservacion($idPlan, $obs);
+    if ($reinvertir !== null) invMarcarReinversion($idPlan, (bool)$reinvertir);
+    invSincronizarReinversion($idPlan);
 
     return ['cobrada' => true, 'liquidada' => invRevisarLiquidacion((int)$p['idInversion'])];
+}
+
+// Marca (o desmarca) que el dividendo de una cuota se reinvierte. No hace nada sin la migración 015.
+function invMarcarReinversion($idPlan, $reinvertir) {
+    global $mysql, $uid;
+    if (!invTieneReinversion()) return;
+    $v = $reinvertir ? 1 : 0;
+    $q = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion SET p.Reinvertido = ? WHERE p.idPlan = ? AND i.IdUsuario = ?");
+    $q->bind_param('iii', $v, $idPlan, $uid);
+    $q->execute();
+}
+
+// Deja el capital de la inversión de acuerdo con la cuota: si está cobrada y marcada como reinvertida, existe un aporte
+// (ligado a la cuota) por el valor del dividendo; si no, ese aporte no existe. Cada cambio ajusta el capital por la diferencia.
+// Así el dividendo reinvertido sigue contando como ingreso recibido pero también como capital puesto (la ganancia no se duplica).
+function invSincronizarReinversion($idPlan) {
+    global $mysql, $uid;
+    if (!invTieneReinversion()) return;
+    $q = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.IdEstado, p.FechaRealPago, p.DividendoPagado, p.Reinvertido
+        FROM PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion WHERE p.idPlan = ? AND i.IdUsuario = ?");
+    $q->bind_param('ii', $idPlan, $uid);
+    $q->execute();
+    $p = $q->get_result()->fetch_assoc();
+    if (!$p) return;
+    $idInv = (int)$p['idInversion'];
+    $cobrado = (int)invEstadoId('Pagos', 'Cobrado');
+    $deseado = ((int)$p['Reinvertido'] === 1 && (int)$p['IdEstado'] === $cobrado) ? round((float)$p['DividendoPagado'], 2) : 0.0;
+
+    $q = $mysql->prepare("SELECT idAporte, Valor FROM aportes_inversion WHERE idPlan = ? AND IdUsuario = ? LIMIT 1");
+    $q->bind_param('ii', $idPlan, $uid);
+    $q->execute();
+    $a = $q->get_result()->fetch_assoc();
+    $actual = $a ? (float)$a['Valor'] : 0.0;
+    $delta = round($deseado - $actual, 2);
+    $fecha = $p['FechaRealPago'] ?: date('Y-m-d');
+
+    if ($deseado > 0 && !$a) {
+        $obs = 'Reinversión del dividendo (cuota ' . $idPlan . ')';
+        $q = $mysql->prepare("INSERT INTO aportes_inversion (idInversion, IdUsuario, Fecha, Valor, Observaciones, idPlan) VALUES (?, ?, ?, ?, ?, ?)");
+        $q->bind_param('iisdsi', $idInv, $uid, $fecha, $deseado, $obs, $idPlan);
+        $q->execute();
+    } elseif ($deseado > 0 && $a) {
+        $idAporte = (int)$a['idAporte'];
+        $q = $mysql->prepare("UPDATE aportes_inversion SET Fecha = ?, Valor = ? WHERE idAporte = ? AND IdUsuario = ?");
+        $q->bind_param('sdii', $fecha, $deseado, $idAporte, $uid);
+        $q->execute();
+    } elseif ($a) {
+        $idAporte = (int)$a['idAporte'];
+        $q = $mysql->prepare("DELETE FROM aportes_inversion WHERE idAporte = ? AND IdUsuario = ?");
+        $q->bind_param('ii', $idAporte, $uid);
+        $q->execute();
+    }
+    if (abs($delta) > 0.001) {
+        $q = $mysql->prepare("UPDATE Inversiones SET CapitalInvertido = GREATEST(CapitalInvertido + ?, 0) WHERE idInversion = ? AND IdUsuario = ?");
+        $q->bind_param('dii', $delta, $idInv, $uid);
+        $q->execute();
+    }
 }
 
 // Recalcula el plan cuando cambia la fecha final de una inversión con plazo (p. ej. octubre -> diciembre: 7 -> 9 cuotas).
@@ -427,6 +511,7 @@ function invRevisarLiquidacion($idInversion, $permitirReabrir = false) {
 function invResumen($inv, $cuotas, $hoy) {
     $capital = (float)$inv['CapitalInvertido'];
     $capitalCobrado = 0.0; $interesCobrado = 0.0; $dividendoCobrado = 0.0;
+    $dividendoReinvertido = 0.0;
     $cobradas = 0; $pendientes = 0; $vencidas = 0; $maxAtraso = 0; $valorVencido = 0.0;
     $proxima = null; $ultimaFecha = null;
     foreach ($cuotas as $c) {
@@ -436,6 +521,7 @@ function invResumen($inv, $cuotas, $hoy) {
             $capitalCobrado += (float)$c['CapitalPagado'];
             $interesCobrado += (float)$c['InteresPagado'];
             $dividendoCobrado += (float)$c['DividendoPagado'];
+            if ((int)($c['Reinvertido'] ?? 0) === 1) $dividendoReinvertido += (float)$c['DividendoPagado'];
         } else {
             $pendientes++;
             $f = $c['FechaPrevistaPago'];
@@ -448,6 +534,10 @@ function invResumen($inv, $cuotas, $hoy) {
         if ($c['FechaPrevistaPago'] !== null && ($ultimaFecha === null || $c['FechaPrevistaPago'] > $ultimaFecha)) $ultimaFecha = $c['FechaPrevistaPago'];
     }
     $saldo = max(0.0, round($capital - $capitalCobrado, 2));
+    // Valor actual (saldo de la plataforma, migración 015). Ganancia = valor actual + todo lo recibido - capital puesto
+    // (el capital ya incluye lo reinvertido, por eso lo reinvertido no se cuenta dos veces).
+    $valorActual = (isset($inv['ValorActual']) && $inv['ValorActual'] !== null) ? (float)$inv['ValorActual'] : null;
+    $ganancia = $valorActual !== null ? round($valorActual + $capitalCobrado + $interesCobrado + $dividendoCobrado - $capital, 2) : null;
     $activa = ($inv['NombreEstado'] === 'Desembolsado');
     $esAcciones = ((int)$inv['IdTipo'] === INV_ACCIONES);
     // Hace falta una cuota nueva si la inversión sigue activa, queda capital y no hay cuotas por cobrar futuras.
@@ -466,6 +556,12 @@ function invResumen($inv, $cuotas, $hoy) {
         'capitalCobrado' => $capitalCobrado,
         'interesCobrado' => $interesCobrado,
         'dividendoCobrado' => $dividendoCobrado,
+        'dividendoReinvertido' => $dividendoReinvertido,
+        'dividendoRetirado' => round($dividendoCobrado - $dividendoReinvertido, 2),
+        'valorActual' => $valorActual,
+        'fechaValorActual' => invFecha($inv['FechaValorActual'] ?? null),
+        'ganancia' => $ganancia,
+        'rentabilidad' => ($ganancia !== null && $capital > 0) ? round($ganancia / $capital, 4) : null,
         'tasa' => (float)$inv['Interes'],
         'nroCuotas' => (int)$inv['NroCuotas'],
         'cuotaPactada' => (float)$inv['CuotaPactada'],
@@ -506,6 +602,7 @@ function invCuotaJson($c, $hoy) {
         'estado' => $c['NombreEstado'],
         'observaciones' => $c['Observaciones'] ?? null,
         'cobrada' => $c['cobrada'],
+        'reinvertido' => (int)($c['Reinvertido'] ?? 0) === 1,
         'diasRestantes' => $dias,
         'vencida' => $dias !== null && $dias < 0,
     ];
@@ -550,6 +647,7 @@ function invCalcularResumen($hoy, $moneda = 'COP') {
         'porCobrar30' => 0.0, 'vencido' => 0.0, 'cuotasVencidas' => 0, 'inversionesAtrasadas' => 0,
         'interesMes' => 0.0, 'interesAnho' => 0.0, 'interesTotal' => 0.0,
         'activas' => 0, 'liquidadas' => 0, 'perdidas' => 0, 'necesitanCuota' => 0,
+        'valorAcciones' => 0.0, 'gananciaAcciones' => 0.0, 'capitalValorado' => 0.0,
     ];
     $meses = [];
     for ($k = 11; $k >= 0; $k--) {
@@ -583,6 +681,7 @@ function invCalcularResumen($hoy, $moneda = 'COP') {
             $kpi['capitalActivo'] += $r['saldo'];
             $kpi['capitalPrestado'] += $r['capital'];
             $kpi['rendimientoMensual'] += $r['rendimientoMensual'];
+            if ($r['valorActual'] !== null) { $kpi['valorAcciones'] += $r['valorActual']; $kpi['gananciaAcciones'] += $r['ganancia']; $kpi['capitalValorado'] += $r['capital']; }
             if ($r['necesitaCuota']) $kpi['necesitanCuota']++;
             $tipo = $r['tipo'] ?? 'Otro';
             if (!isset($porTipo[$tipo])) $porTipo[$tipo] = ['tipo' => $tipo, 'cantidad' => 0, 'capital' => 0.0];

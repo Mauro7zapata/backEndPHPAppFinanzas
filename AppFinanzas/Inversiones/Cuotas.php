@@ -16,7 +16,7 @@ header('Content-Type: application/json; charset=utf-8');
 //                                                                           corrige una cuota; si cambia la fecha y recalcularSiguientes=true,
 //                                                                           las cuotas pendientes siguientes se corren mes a mes desde la nueva fecha
 //        observar {idPlan, observaciones}                                   guarda (reemplaza) la observación de la cuota
-//        cobrar {idPlan, fecha?, interes?, capital?, dividendo?, observaciones?}  la marca como cobrada
+//        cobrar {idPlan, fecha?, interes?, capital?, dividendo?, observaciones?, reinvertir?}  la marca como cobrada (reinvertir: el dividendo suma al capital)
 //        deshacer {idPlan}                                                  vuelve a Pendiente
 //        eliminar {idPlan}
 
@@ -117,6 +117,8 @@ try {
                     SET p.Observaciones = ? WHERE p.idPlan = ? AND i.IdUsuario = ?");
                 $st->bind_param('sii', $obs, $idPlan, $uid); $st->execute();
             }
+            if (array_key_exists('reinvertir', $d)) invMarcarReinversion($idPlan, !empty($d['reinvertir']));
+            invSincronizarReinversion($idPlan);
             // Si se movió la fecha, las pendientes siguientes se corren mes a mes desde la nueva fecha (las cobradas no se tocan).
             $corridas = 0;
             if (!empty($d['recalcularSiguientes']) && $fila['FechaPrevistaPago'] !== $fecha) {
@@ -152,7 +154,8 @@ try {
             foreach ([$interes, $capital, $dividendo] as $v) {
                 if ($v !== null && ($v < 0 || $v >= 10000000000)) { echo json_encode(['error' => 'Un importe no es válido']); exit; }
             }
-            $r = invCobrarCuota($idPlan, $fecha ?: null, $interes, $capital, $dividendo, $d['observaciones'] ?? null);
+            $reinv = array_key_exists('reinvertir', $d) ? !empty($d['reinvertir']) : null;
+            $r = invCobrarCuota($idPlan, $fecha ?: null, $interes, $capital, $dividendo, $d['observaciones'] ?? null, $reinv);
             echo json_encode($r === null ? ['error' => 'La cuota no existe'] : $r);
             break;
 
@@ -179,7 +182,7 @@ try {
                 $stmt->bind_param('iii', $estado, $idPlan, $uid);
                 $stmt->execute();
             }
-            if ($fila) invRevisarLiquidacion((int)$fila['idInversion'], true);
+            if ($fila) { invSincronizarReinversion($idPlan); invRevisarLiquidacion((int)$fila['idInversion'], true); }
             echo json_encode(['updated' => (bool)$fila]);
             break;
 
@@ -187,6 +190,7 @@ try {
             $idPlan = appfinanzas_entero($d['idPlan'] ?? null);
             if ($idPlan === null) { echo json_encode(['error' => 'Falta idPlan']); break; }
             $fila = cuotaDelUsuario($idPlan);
+            if ($fila) { invMarcarReinversion($idPlan, false); invSincronizarReinversion($idPlan); }
             $stmt = $mysql->prepare("DELETE p FROM PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
                 WHERE p.idPlan = ? AND i.IdUsuario = ?");
             $stmt->bind_param('ii', $idPlan, $uid);

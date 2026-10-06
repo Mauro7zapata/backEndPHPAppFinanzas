@@ -85,7 +85,7 @@ if ($p) {
     $presupuesto['abiertos'] = resumenCierrePresupuesto($idPresupuesto)['abiertos'];
 
     $stmt = $mysql->prepare("SELECT e.NombreEstado AS estado, COUNT(*) AS n,
-            COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(g.valorGastosMovimiento),0) AS pagado
+            COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(" . sqlValorEfectivoGasto() . "),0) AS pagado
         FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = ?
         WHERE g.idPresupuesto = ? GROUP BY e.NombreEstado");
     $stmt->bind_param('ii', $uid, $idPresupuesto);

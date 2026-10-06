@@ -77,6 +77,10 @@ function procesarAccion($data) {
 
                 if ($crear) {
                     $moneda = invMonedaValida($data['Moneda'] ?? 'COP');
+                    if ($moneda !== 'COP' && !invTieneMoneda()) {
+                        echo json_encode(['error' => 'Falta ejecutar la migración 013 (moneda de inversiones) en la base de datos. No se guardó para evitar registrarla en pesos.'], JSON_UNESCAPED_UNICODE);
+                        return;
+                    }
                     $stmt = $mysql->prepare("INSERT INTO Inversiones (Nombre, IdTipo, CapitalInvertido, FechaInicio, FechaFin, Interes, NroCuotas, CuotaPactada, PeriodicidadPagoDividendos, idEstado, IdUsuario) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                     $stmt->bind_param('sidssdidiii', $nombre, $tipo, $capital, $inicio, $fin, $tasa, $nro, $cuota, $per, $estado, $uid);
                     $stmt->execute();
@@ -113,6 +117,10 @@ function procesarAccion($data) {
                     $stmt->bind_param('ii', $id, $uid); $stmt->execute();
                     $q = $mysql->prepare("DELETE FROM aportes_inversion WHERE idInversion = ? AND IdUsuario = ?");
                     $q->bind_param('ii', $id, $uid); $q->execute();
+                    if (invTieneValor()) {
+                        $q = $mysql->prepare("DELETE FROM valoraciones_inversion WHERE idInversion = ? AND IdUsuario = ?");
+                        $q->bind_param('ii', $id, $uid); $q->execute();
+                    }
                     $stmt = $mysql->prepare("DELETE FROM Inversiones WHERE idInversion = ? AND IdUsuario = ?");
                     $stmt->bind_param('ii', $id, $uid); $stmt->execute();
                     $mysql->commit();
