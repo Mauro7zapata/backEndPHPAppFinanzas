@@ -1,5 +1,11 @@
 # Changelog · Backend
 
+## 2026-10-05 (18) · Inversiones en COP/USD y saldo separado con usos
+**Requiere `sql/013_moneda_inversiones.sql` y `sql/014_saldo_separado.sql` (con respaldo; la 013 necesita la 011 y la 014 la 012).** Antes de migrar todo sigue funcionando.
+- **Moneda** (`013`): `Inversiones.Moneda` y `fondo_inversion.Moneda` (COP por defecto); importes de inversiones a DECIMAL(15,2). `libInversiones.php`: `invCalcularResumen($hoy, $moneda)` filtra por moneda (las monedas no se mezclan), `invRedondear` (COP entero, USD centavos), fondo por moneda; `Resumen.php`/`Fondo.php` aceptan `moneda`; `inversion.php` fija la moneda solo al crear y la devuelve; Inicio y alertas incluyen `moneda` en los cobros. El KPI de Inicio sigue siendo solo COP.
+- **Saldo separado** (`014`): tabla `separado_usos` (Uso / Ajuste por lugar). `lib.php`: `saldoSeparadoPorLugar()` y `saldoSeparadoTotal()` = Guardado + Acumulado (todos los meses) + ajustes − usos. `Inicio/Dashboard.php` envía `separadoSaldo`. `Presupuesto/LugaresGuardado.php`: GET devuelve aportado/usado/ajuste/saldo por lugar; `?historial=1&idLugar=`; POST `usar`, `corregir`, `eliminarMovimiento`.
+- Archivos a subir: `lib.php`, `libInversiones.php`, `libAuth.php` (sin cambios nuevos), `Inicio/Dashboard.php`, `Deudas/Alertas.php`, `Inversiones/{Resumen,Fondo,inversion}.php`, `Presupuesto/LugaresGuardado.php`.
+
 ## 2026-10-05 (17) · Aviso «Vas rápido» con proyección realista
 - `Inicio/Dashboard.php`: `proyeccionCierre` = pagado + por pagar (compromisos reales) en vez de extrapolar por días, que inflaba el cierre cuando los pagos grandes caen a inicio de mes. El aviso ahora tiene tres versiones: «Vas rápido» (el cierre supera el presupuesto, indica cuánto), «Vas ajustado» (≥ 90 %) y «Pagaste temprano» (informativo, dentro del presupuesto). No incluye gastos nuevos aún no registrados. Solo sube `Inicio/Dashboard.php`; la app no cambia.
 

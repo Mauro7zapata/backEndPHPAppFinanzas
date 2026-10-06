@@ -7,7 +7,7 @@ header('Content-Type: application/json; charset=utf-8');
 // Fondo de inversión: cuánto dinero tienes DISPONIBLE para invertir y cuánto está INVERTIDO.
 // Requiere la migración 011 (tabla fondo_inversion).
 //
-//   GET  Fondo.php        -> {fondo: {disponible, invertido, patrimonio, ingresos, retiros, descuadre, cobrado, desembolsado, perdido, ...},
+//   GET  Fondo.php?moneda=COP|USD -> {fondo: {disponible, invertido, patrimonio, ingresos, retiros, descuadre, cobrado, desembolsado, perdido, ...},
 //                             movimientos: [{idMovFondo, fecha, tipo, valor, nota}]}
 //   POST Fondo.php (JSON) accion:
 //        ingreso   {fecha, valor, nota?}   dinero que pasa al fondo para invertir
@@ -23,23 +23,35 @@ function validarValorFondo($v) {
     return ($v !== null && $v !== '' && is_numeric($v) && (float)$v > 0 && (float)$v < 100000000000);
 }
 
-function insertarMovFondo($fecha, $tipo, $valor, $nota) {
+function insertarMovFondo($fecha, $tipo, $valor, $nota, $moneda = 'COP') {
     global $mysql, $uid;
+    $moneda = invMonedaValida($moneda);
     $nota = $nota === null ? null : mb_substr(trim((string)$nota), 0, 250, 'UTF-8');
     if ($nota === '') $nota = null;
-    $q = $mysql->prepare("INSERT INTO fondo_inversion (IdUsuario, Fecha, Tipo, Valor, Nota) VALUES (?, ?, ?, ?, ?)");
-    $q->bind_param('issds', $uid, $fecha, $tipo, $valor, $nota);
+    if (invFondoTieneMoneda()) {
+        $q = $mysql->prepare("INSERT INTO fondo_inversion (IdUsuario, Fecha, Tipo, Valor, Nota, Moneda) VALUES (?, ?, ?, ?, ?, ?)");
+        $q->bind_param('issdss', $uid, $fecha, $tipo, $valor, $nota, $moneda);
+    } else {
+        $q = $mysql->prepare("INSERT INTO fondo_inversion (IdUsuario, Fecha, Tipo, Valor, Nota) VALUES (?, ?, ?, ?, ?)");
+        $q->bind_param('issds', $uid, $fecha, $tipo, $valor, $nota);
+    }
     $q->execute();
     return $mysql->insert_id;
 }
 
-function estadoFondo() {
+function estadoFondo($moneda = 'COP') {
     global $mysql, $uid;
-    $res = invCalcularResumen(date('Y-m-d'));
+    $moneda = invMonedaValida($moneda);
+    $res = invCalcularResumen(date('Y-m-d'), $moneda);
     $fondo = $res['fondo'];
     if ($fondo === null) return null;
-    $q = $mysql->prepare("SELECT idMovFondo, Fecha, Tipo, Valor, Nota FROM fondo_inversion WHERE IdUsuario = ? ORDER BY Fecha DESC, idMovFondo DESC LIMIT 100");
-    $q->bind_param('i', $uid);
+    if (invFondoTieneMoneda()) {
+        $q = $mysql->prepare("SELECT idMovFondo, Fecha, Tipo, Valor, Nota FROM fondo_inversion WHERE IdUsuario = ? AND Moneda = ? ORDER BY Fecha DESC, idMovFondo DESC LIMIT 100");
+        $q->bind_param('is', $uid, $moneda);
+    } else {
+        $q = $mysql->prepare("SELECT idMovFondo, Fecha, Tipo, Valor, Nota FROM fondo_inversion WHERE IdUsuario = ? ORDER BY Fecha DESC, idMovFondo DESC LIMIT 100");
+        $q->bind_param('i', $uid);
+    }
     $q->execute();
     $movs = [];
     foreach ($q->get_result()->fetch_all(MYSQLI_ASSOC) as $m) {
@@ -50,7 +62,7 @@ function estadoFondo() {
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     try {
-        $e = estadoFondo();
+        $e = estadoFondo($_GET['moneda'] ?? 'COP');
         echo json_encode($e ?? ['error' => 'Falta ejecutar la migración 011 en la base de datos'], JSON_UNESCAPED_UNICODE);
     } catch (mysqli_sql_exception $ex) {
         error_log('[AppFinanzas] Fondo.php GET: ' . $ex->getMessage());
@@ -62,6 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 $d = json_decode(file_get_contents('php://input'), true);
 if (!is_array($d)) $d = $_POST;
 
+$monedaFondo = invMonedaValida($d['moneda'] ?? 'COP');
 try {
     switch ($d['accion'] ?? '') {
         case 'ingreso':
@@ -69,7 +82,7 @@ try {
             if (!validarValorFondo($d['valor'] ?? null)) { echo json_encode(['error' => 'El valor debe ser mayor que cero']); break; }
             $fecha = $d['fecha'] ?? date('Y-m-d');
             if (!appfinanzas_fecha_valida($fecha)) { echo json_encode(['error' => 'La fecha no es válida (AAAA-MM-DD)']); break; }
-            $id = insertarMovFondo($fecha, $d['accion'] === 'ingreso' ? 'Ingreso' : 'Retiro', round((float)$d['valor'], 2), $d['nota'] ?? null);
+            $id = insertarMovFondo($fecha, $d['accion'] === 'ingreso' ? 'Ingreso' : 'Retiro', round((float)$d['valor'], 2), $d['nota'] ?? null, $monedaFondo);
             echo json_encode(['id' => $id]);
             break;
 
@@ -79,7 +92,7 @@ try {
                 echo json_encode(['error' => 'Escribe cuánto dinero tienes disponible hoy (0 o más)']); break;
             }
             $real = round((float)$real, 2);
-            $e = estadoFondo();
+            $e = estadoFondo($monedaFondo);
             if ($e === null) { echo json_encode(['error' => 'Falta ejecutar la migración 011 en la base de datos']); break; }
             $esperado = (float)$e['fondo']['disponible'];
             $dif = round($real - $esperado, 2);
@@ -87,10 +100,10 @@ try {
             $nota = trim((string)($d['nota'] ?? ''));
             if ($e['fondo']['movimientos'] === 0 && $dif > 0) {
                 // Primera vez: lo que tienes de más es tu punto de partida, no un descuadre.
-                insertarMovFondo(date('Y-m-d'), 'Ingreso', $dif, 'Saldo inicial' . ($nota !== '' ? ': ' . $nota : ''));
+                insertarMovFondo(date('Y-m-d'), 'Ingreso', $dif, 'Saldo inicial' . ($nota !== '' ? ': ' . $nota : ''), $monedaFondo);
                 echo json_encode(['descuadre' => 0.0, 'esperado' => $esperado, 'real' => $real, 'tipo' => 'Saldo inicial', 'valor' => $dif]);
             } else {
-                insertarMovFondo(date('Y-m-d'), 'Ajuste', $dif, 'Descuadre: la app calculaba ' . number_format($esperado, 0, ',', '.') . ($nota !== '' ? ' · ' . $nota : ''));
+                insertarMovFondo(date('Y-m-d'), 'Ajuste', $dif, 'Descuadre: la app calculaba ' . number_format($esperado, $monedaFondo === 'USD' ? 2 : 0, ',', '.') . ($nota !== '' ? ' · ' . $nota : ''), $monedaFondo);
                 echo json_encode(['descuadre' => $dif, 'esperado' => $esperado, 'real' => $real, 'tipo' => 'Ajuste', 'valor' => $dif]);
             }
             break;

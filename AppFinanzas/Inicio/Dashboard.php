@@ -63,7 +63,7 @@ $p = $stmt->get_result()->fetch_assoc();
 
 $presupuesto = ['existe' => false, 'id' => null, 'valor' => 0.0, 'extras' => 0.0, 'total' => 0.0,
     'estado' => 'En curso', 'finalizado' => false, 'cierreManual' => false, 'fechaFinalizado' => null, 'abiertos' => 0,
-    'guardado' => 0.0, 'acumulado' => 0.0, 'guardadoPrevisto' => 0.0, 'acumuladoPrevisto' => 0.0, 'acumuladoObligaciones' => 0.0,
+    'separadoSaldo' => null, 'guardado' => 0.0, 'acumulado' => 0.0, 'guardadoPrevisto' => 0.0, 'acumuladoPrevisto' => 0.0, 'acumuladoObligaciones' => 0.0,
     'previsto' => 0.0, 'pagado' => 0.0, 'ahorrado' => 0.0, 'gastadoConsumo' => 0.0, 'porPagar' => 0.0,
     'restante' => 0.0, 'libre' => 0.0, 'porcentajeUsado' => 0.0, 'porcentajeMes' => round($diaActual / $diasMes, 4),
     'gastosTotal' => 0, 'pendientes' => 0, 'enProceso' => 0, 'pagados' => 0, 'vencidos' => 0, 'valorVencido' => 0.0,
@@ -101,6 +101,8 @@ if ($p) {
         if ($f['estado'] === 'En proceso') $presupuesto['enProceso'] += (int)$f['n'];
         if ($f['estado'] === 'Pagado') $presupuesto['pagados'] += (int)$f['n'];
     }
+    // Saldo separado de hoy: todo lo guardado/acumulado en todos los meses, menos lo que ya usaste (migración 014) ± ajustes.
+    $presupuesto['separadoSaldo'] = saldoSeparadoTotal();
     $presupuesto['gastadoConsumo'] = $presupuesto['pagado'] - $presupuesto['ahorrado'];
     $presupuesto['porPagar'] = max(0.0, $presupuesto['previsto'] - $presupuesto['pagado']);
     $presupuesto['restante'] = $presupuesto['total'] - $presupuesto['pagado'];
@@ -224,7 +226,7 @@ $inversiones = ['activas' => $inv['activas'], 'capitalActivo' => $inv['capitalAc
     'porCobrar30' => $inv['porCobrar30'], 'vencido' => $inv['vencido'], 'cuotasVencidas' => $inv['cuotasVencidas'], 'inversionesAtrasadas' => $inv['inversionesAtrasadas'],
     'rendimientoMensual' => $inv['rendimientoMensual'], 'necesitanCuota' => $inv['necesitanCuota']];
 
-$stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre
+$stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre, " . invSqlMoneda() . " AS Moneda
     FROM PlanPagos p
     INNER JOIN Inversiones i ON i.idInversion = p.idInversion AND i.IdUsuario = ?
     INNER JOIN estados ei ON ei.idEstado = i.idEstado AND ei.IdUsuario = i.IdUsuario AND ei.NombreEstado = 'Desembolsado'
@@ -239,7 +241,7 @@ $stmt->execute();
 foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $c) {
     $agenda[] = ['tipo' => 'cobro', 'id' => (int)$c['idPlan'], 'idInversion' => (int)$c['idInversion'], 'titulo' => 'Cobrar a ' . trim($c['Nombre']) . ' · cuota ' . $c['NroCuota'],
         'fecha' => $c['FechaPrevistaPago'], 'dias' => dias_hasta($c['FechaPrevistaPago']),
-        'valor' => (float)$c['InteresPagado'] + (float)$c['CapitalPagado'] + (float)$c['DividendoPagado'], 'entra' => true];
+        'valor' => (float)$c['InteresPagado'] + (float)$c['CapitalPagado'] + (float)$c['DividendoPagado'], 'entra' => true, 'moneda' => $c['Moneda']];
 }
 
 // Pagos pendientes del presupuesto que se está viendo (solo de ese mes; deudas, cobros y obligaciones no dependen del mes).

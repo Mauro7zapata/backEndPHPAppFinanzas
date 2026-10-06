@@ -24,6 +24,44 @@ const INV_COBRANZA = 10;
 const INV_HORIZONTE_CUOTAS = 12;
 
 // Estado del usuario autenticado por tipo y nombre (cada usuario tiene su propio juego de estados).
+// Monedas admitidas en inversiones. Sin la migración 013 todo se considera COP.
+const INV_MONEDAS = ['COP', 'USD'];
+
+function invMonedaValida($m) {
+    $m = strtoupper(trim((string)$m));
+    return in_array($m, INV_MONEDAS, true) ? $m : 'COP';
+}
+
+function invTieneMoneda() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'Inversiones' AND column_name = 'Moneda'");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] > 0;
+    }
+    return $tiene;
+}
+
+// Fragmento SELECT con la moneda de la inversión (alias i); 'COP' fijo si aún no existe la migración 013.
+function invSqlMoneda() {
+    return invTieneMoneda() ? "i.Moneda" : "'COP'";
+}
+
+// Redondeo de importes de cuotas y rendimientos: pesos enteros en COP, centavos en USD.
+function invRedondear($v, $inv) {
+    return round($v, (($inv['Moneda'] ?? 'COP') === 'USD') ? 2 : 0);
+}
+
+function invFondoTieneMoneda() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'fondo_inversion' AND column_name = 'Moneda'");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] > 0;
+    }
+    return $tiene;
+}
+
 function invEstadoId($tipoEstado, $nombre) {
     global $mysql, $uid;
     static $cache = [];
@@ -164,26 +202,26 @@ function invProponerCuota($inv, $cuotas, $modo) {
 
         switch ($tipo) {
             case INV_AMORTIZACION:
-                $interes = round($saldo * $tasa);
+                $interes = invRedondear($saldo * $tasa, $inv);
                 if ($esUltima) {
                     $capitalCuota = $saldo;
                 } elseif ($pactada > $interes + 0.5) {
-                    $capitalCuota = min($saldo, round($pactada - $interes));
+                    $capitalCuota = min($saldo, invRedondear($pactada - $interes, $inv));
                 }
                 break;
             case INV_INTERES_FIJO:
             case INV_INDEFINIDO:
-                $interes = round($saldo * $tasa);
+                $interes = invRedondear($saldo * $tasa, $inv);
                 if ($esUltima) $capitalCuota = $saldo;
                 break;
             case INV_GANANCIA_FIJA:
                 // Una sola cuota: capital + ganancia en la fecha final.
                 $capitalCuota = $saldo;
                 if ($pactada > $capital) {
-                    $interes = round($pactada - $capital);
+                    $interes = invRedondear($pactada - $capital, $inv);
                 } else {
                     $meses = $fechaFin ? max(1, (int)round((strtotime($fechaFin) - strtotime($inv['FechaInicio'])) / (86400 * 30.4))) : 1;
-                    $interes = round($capital * $tasa * $meses);
+                    $interes = invRedondear($capital * $tasa * $meses, $inv);
                 }
                 if ($fechaFin) $fecha = $fechaFin;
                 $esUltima = true;
@@ -418,6 +456,7 @@ function invResumen($inv, $cuotas, $hoy) {
     return [
         'idInversion' => (int)$inv['idInversion'],
         'nombre' => $inv['Nombre'],
+        'moneda' => $inv['Moneda'] ?? 'COP',
         'idTipo' => (int)$inv['IdTipo'],
         'tipo' => $inv['NombreTipo'],
         'idEstado' => (int)$inv['idEstado'],
@@ -442,7 +481,7 @@ function invResumen($inv, $cuotas, $hoy) {
         'proximaFecha' => $proxima ? $proxima['fecha'] : null,
         'proximoValor' => $proxima ? $proxima['valor'] : null,
         'progreso' => $capital > 0 ? min(1.0, round($capitalCobrado / $capital, 4)) : 0.0,
-        'rendimientoMensual' => $activa ? round($saldo * (float)$inv['Interes'] / 100) : 0.0,
+        'rendimientoMensual' => $activa ? invRedondear($saldo * (float)$inv['Interes'] / 100, $inv) : 0.0,
         'necesitaCuota' => $necesitaCuota,
     ];
 }
@@ -474,7 +513,7 @@ function invCuotaJson($c, $hoy) {
 
 // Resumen general del módulo: KPIs, cobros por mes, capital por tipo/estado y cada inversión con su avance.
 // Lo usan Inversiones/Resumen.php y el dashboard de inicio.
-function invCalcularResumen($hoy) {
+function invCalcularResumen($hoy, $moneda = 'COP') {
     global $mysql, $uid;
     $mesActual = substr($hoy, 0, 7);
     $anhoActual = substr($hoy, 0, 4);
@@ -486,7 +525,10 @@ function invCalcularResumen($hoy) {
         WHERE i.IdUsuario = ?");
     $stmt->bind_param('i', $uid);
     $stmt->execute();
-    $inversiones = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $moneda = invMonedaValida($moneda);
+    // Solo las inversiones de la moneda pedida (las monedas no se mezclan ni se convierten). Sin migración 013 todo es COP.
+    $inversiones = array_values(array_filter($stmt->get_result()->fetch_all(MYSQLI_ASSOC),
+        function ($i) use ($moneda) { return ($i['Moneda'] ?? 'COP') === $moneda; }));
 
     // Todas las cuotas de una vez (evita una consulta por inversión).
     $porInversion = [];
@@ -523,6 +565,7 @@ function invCalcularResumen($hoy) {
     foreach ($inversiones as $inv) {
         $cuotas = $porInversion[(int)$inv['idInversion']] ?? [];
         $r = invResumen($inv, $cuotas, $hoy);
+        $r['moneda'] = $moneda;
         $lista[] = $r;
         $desembolsado += $r['capital'];
         $retornos += $r['capitalCobrado'] + $r['interesCobrado'] + $r['dividendoCobrado'];
@@ -579,8 +622,9 @@ function invCalcularResumen($hoy) {
     });
 
     return [
+        'moneda' => $moneda,
         'kpi' => $kpi,
-        'fondo' => invCalcularFondo($desembolsado, $retornos, $kpi['capitalActivo'], $perdido),
+        'fondo' => invCalcularFondo($desembolsado, $retornos, $kpi['capitalActivo'], $perdido, $moneda),
         'meses' => array_values($meses),
         'porTipo' => array_values($porTipo),
         'porEstado' => array_values($porEstado),
@@ -592,24 +636,31 @@ function invCalcularResumen($hoy) {
 // Disponible para invertir = Ingresos - Retiros + Ajustes (descuadre) + lo cobrado (capital, intereses, dividendos) - capital desembolsado.
 // Invertido = capital que sigue en la calle. El «descuadre» es la suma de los ajustes: lo que el usuario declaró distinto de lo que la app calculaba.
 // Devuelve null si la tabla aún no existe.
-function invTotalesFondo() {
+function invTotalesFondo($moneda = 'COP') {
     global $mysql, $uid;
-    $stmt = $mysql->prepare("SELECT Tipo, COALESCE(SUM(Valor), 0) AS t, COUNT(*) AS n FROM fondo_inversion WHERE IdUsuario = ? GROUP BY Tipo");
-    $stmt->bind_param('i', $uid);
+    $moneda = invMonedaValida($moneda);
+    if (invFondoTieneMoneda()) {
+        $stmt = $mysql->prepare("SELECT Tipo, COALESCE(SUM(Valor), 0) AS t, COUNT(*) AS n FROM fondo_inversion WHERE IdUsuario = ? AND Moneda = ? GROUP BY Tipo");
+        $stmt->bind_param('is', $uid, $moneda);
+    } else {
+        $stmt = $mysql->prepare("SELECT Tipo, COALESCE(SUM(Valor), 0) AS t, COUNT(*) AS n FROM fondo_inversion WHERE IdUsuario = ? GROUP BY Tipo");
+        $stmt->bind_param('i', $uid);
+    }
     $stmt->execute();
     $t = ['Ingreso' => 0.0, 'Retiro' => 0.0, 'Ajuste' => 0.0, 'movimientos' => 0];
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) { $t[$f['Tipo']] = (float)$f['t']; $t['movimientos'] += (int)$f['n']; }
     return $t;
 }
 
-function invCalcularFondo($desembolsado, $retornos, $invertido, $perdido) {
+function invCalcularFondo($desembolsado, $retornos, $invertido, $perdido, $moneda = 'COP') {
     try {
-        $t = invTotalesFondo();
+        $t = invTotalesFondo($moneda);
     } catch (mysqli_sql_exception $e) {
         return null; // migración 011 sin ejecutar
     }
     $disponible = round($t['Ingreso'] - $t['Retiro'] + $t['Ajuste'] + $retornos - $desembolsado, 2);
     return [
+        'moneda' => invMonedaValida($moneda),
         'disponible' => $disponible,
         'invertido' => round($invertido, 2),
         'patrimonio' => round($disponible + $invertido, 2),

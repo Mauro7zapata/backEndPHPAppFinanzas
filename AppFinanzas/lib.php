@@ -252,6 +252,59 @@ function sqlLugarGasto() {
     return ", NULL AS idLugar, NULL AS NombreLugar";
 }
 
+// true si existe la tabla separado_usos (migración 014). Sin ella el saldo separado = lo aportado.
+function separadoTieneUsos() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'separado_usos'");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] > 0;
+    }
+    return $tiene;
+}
+
+// Saldo separado por lugar (clave 0 = «sin lugar»), de todos los meses:
+//   saldo = aportado (movimientos de gastos Guardado/Acumulado) + ajustes - usado.
+// Cada elemento: guardado, acumulado, usado, ajuste, gastos, saldo.
+function saldoSeparadoPorLugar() {
+    global $mysql, $uid;
+    $vacio = function () { return ['guardado' => 0.0, 'acumulado' => 0.0, 'usado' => 0.0, 'ajuste' => 0.0, 'gastos' => 0, 'saldo' => 0.0]; };
+    $lugares = [];
+    $colLugar = gastosTieneLugar() ? "COALESCE(g.idLugar, 0)" : "0";
+    $q = $mysql->prepare("SELECT $colLugar AS l, e.NombreEstado AS est, COALESCE(SUM(g.valorGastosMovimiento), 0) AS t, COUNT(*) AS n
+        FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = p.IdUsuario
+        WHERE p.IdUsuario = ? AND e.NombreEstado IN ('Guardado', 'Acumulado') GROUP BY l, e.NombreEstado");
+    $q->bind_param('i', $uid);
+    $q->execute();
+    foreach ($q->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
+        $l = (int)$f['l'];
+        if (!isset($lugares[$l])) $lugares[$l] = $vacio();
+        $lugares[$l][$f['est'] === 'Guardado' ? 'guardado' : 'acumulado'] += (float)$f['t'];
+        $lugares[$l]['gastos'] += (int)$f['n'];
+    }
+    if (separadoTieneUsos()) {
+        $q = $mysql->prepare("SELECT COALESCE(idLugar, 0) AS l, Tipo, COALESCE(SUM(Valor), 0) AS t FROM separado_usos WHERE IdUsuario = ? GROUP BY l, Tipo");
+        $q->bind_param('i', $uid);
+        $q->execute();
+        foreach ($q->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
+            $l = (int)$f['l'];
+            if (!isset($lugares[$l])) $lugares[$l] = $vacio();
+            $lugares[$l][$f['Tipo'] === 'Uso' ? 'usado' : 'ajuste'] += (float)$f['t'];
+        }
+    }
+    foreach ($lugares as $l => $v) {
+        $lugares[$l]['saldo'] = round($v['guardado'] + $v['acumulado'] + $v['ajuste'] - $v['usado'], 2);
+    }
+    return $lugares;
+}
+
+function saldoSeparadoTotal() {
+    $t = 0.0;
+    foreach (saldoSeparadoPorLugar() as $v) $t += $v['saldo'];
+    return round($t, 2);
+}
+
 function obligacionesTieneAhorroInicial() {
     global $mysql;
     static $tiene = null;

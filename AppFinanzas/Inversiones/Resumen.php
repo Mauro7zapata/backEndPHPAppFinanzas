@@ -16,4 +16,5 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     exit;
 }
 
-echo json_encode(invCalcularResumen(date('Y-m-d')), JSON_UNESCAPED_UNICODE);
+// ?moneda=COP|USD (por defecto COP): el resumen, los KPI y el fondo son de una sola moneda; no se convierten ni se suman.
+echo json_encode(invCalcularResumen(date('Y-m-d'), invMonedaValida($_GET['moneda'] ?? 'COP')), JSON_UNESCAPED_UNICODE);

@@ -54,7 +54,7 @@ function alertas($dias, $diasObligaciones) {
     }
 
     // Cobros de inversiones: cuotas por cobrar que vencen en los próximos $dias o vencieron hace menos de 60 días.
-    $stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre
+    $stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrevistaPago, p.InteresPagado, p.CapitalPagado, p.DividendoPagado, i.Nombre, " . invSqlMoneda() . " AS Moneda
         FROM PlanPagos p
         INNER JOIN Inversiones i ON i.idInversion = p.idInversion AND i.IdUsuario = ?
         INNER JOIN estados ei ON ei.idEstado = i.idEstado AND ei.IdUsuario = i.IdUsuario AND ei.NombreEstado = 'Desembolsado'
@@ -76,6 +76,7 @@ function alertas($dias, $diasObligaciones) {
             'diasRestantes' => $d,
             'vencida' => $d < 0,
             'valor' => (float)$c['InteresPagado'] + (float)$c['CapitalPagado'] + (float)$c['DividendoPagado'],
+            'moneda' => $c['Moneda'],
             'esDeuda' => false,
             'persistente' => true,
         ];

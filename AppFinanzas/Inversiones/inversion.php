@@ -43,6 +43,7 @@ function validarInversion($d, $esCrear) {
         if (!appfinanzas_fecha_valida($fin)) return 'La fecha final no es válida (AAAA-MM-DD)';
         if ($fin < $d['FechaInicio']) return 'La fecha final no puede ser anterior a la de inicio';
     }
+    if ($esCrear && isset($d['Moneda']) && !in_array(strtoupper(trim((string)$d['Moneda'])), INV_MONEDAS, true)) return 'La moneda debe ser COP o USD';
     if (!$esCrear || isset($d['idEstado'])) {
         $est = appfinanzas_entero($d['idEstado'] ?? null);
         if ($est === null) return 'El estado no es válido';
@@ -75,10 +76,18 @@ function procesarAccion($data) {
                 $estado = isset($data['idEstado']) ? appfinanzas_entero($data['idEstado']) : invEstadoId('Inversion', 'Desembolsado');
 
                 if ($crear) {
+                    $moneda = invMonedaValida($data['Moneda'] ?? 'COP');
                     $stmt = $mysql->prepare("INSERT INTO Inversiones (Nombre, IdTipo, CapitalInvertido, FechaInicio, FechaFin, Interes, NroCuotas, CuotaPactada, PeriodicidadPagoDividendos, idEstado, IdUsuario) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                     $stmt->bind_param('sidssdidiii', $nombre, $tipo, $capital, $inicio, $fin, $tasa, $nro, $cuota, $per, $estado, $uid);
                     $stmt->execute();
-                    echo json_encode(['id' => $mysql->insert_id]);
+                    $idNueva = $mysql->insert_id;
+                    // La moneda solo se fija al crear (cambiarla con pagos hechos descuadraría todo). Sin migración 013 se ignora.
+                    if (invTieneMoneda() && $moneda !== 'COP') {
+                        $q = $mysql->prepare("UPDATE Inversiones SET Moneda = ? WHERE idInversion = ? AND IdUsuario = ?");
+                        $q->bind_param('sii', $moneda, $idNueva, $uid);
+                        $q->execute();
+                    }
+                    echo json_encode(['id' => $idNueva]);
                 } else {
                     $id = appfinanzas_entero($data['idInversion'] ?? null);
                     if ($id === null) { echo json_encode(['error' => 'Falta idInversion']); return; }
@@ -133,6 +142,7 @@ function filaInversion($row) {
         "PeriodicidadPagoDividendos" => (int)$row['PeriodicidadPagoDividendos'],
         "CapitalInvertido" => (float)$row['CapitalInvertido'],
         "idEstado" => (int)$row['idEstado'],
+        "Moneda" => $row['Moneda'] ?? 'COP',
     ];
 }
 
