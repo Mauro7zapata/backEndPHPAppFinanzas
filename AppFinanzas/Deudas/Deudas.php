@@ -8,7 +8,7 @@ header('Content-Type: application/json; charset=utf-8');
 //
 //   GET  Deudas.php            -> lista de deudas con saldo calculado
 //   GET  Deudas.php?id=N       -> una deuda con sus últimos movimientos
-//   POST Deudas.php (JSON)     -> accion: crear | actualizar | eliminar | movimiento | eliminarMovimiento
+//   POST Deudas.php (JSON)     -> accion: crear | actualizar | eliminar | movimiento | actualizarMovimiento | eliminarMovimiento
 //
 // Saldo actual = saldoInicial + cargos + intereses - abonos.
 // Los abonos de los gastos del presupuesto vinculados a la deuda se crean solos (ver lib.php).
@@ -28,6 +28,8 @@ function validarDeuda($d) {
         $v = numeroOpcional($d[$c] ?? null);
         if ($v !== null && (!is_numeric($v) || $v < 0 || $v >= 1000000000)) return "El valor de $c no es válido";
     }
+    $usd = numeroOpcional($d['saldoInicialUsd'] ?? null);
+    if ($usd !== null && (!is_numeric($usd) || $usd < 0 || $usd >= 1000000000)) return 'El saldo inicial en dólares no es válido';
     $tasa = numeroOpcional($d['tasaAnual'] ?? null);
     if ($tasa !== null && (!is_numeric($tasa) || $tasa < 0 || $tasa > 999)) return 'La tasa anual no es válida';
     foreach (['diaCorte', 'diaPago'] as $c) {
@@ -42,9 +44,10 @@ function validarDeuda($d) {
 // Siempre filtra por el usuario autenticado (el parámetro enlazado IdUsuario va primero); $where es una condición adicional sin WHERE.
 function seleccionDeuda($where = '') {
     $filtro = 'WHERE d.IdUsuario = ?' . ($where !== '' ? " AND $where" : '');
-    return "SELECT d.*, " . SQL_SALDO_DEUDA . " AS saldoActual,
-        COALESCE((SELECT SUM(md.Valor) FROM movimientos_deuda md WHERE md.idDeuda = d.idDeuda AND md.Tipo = 'Abono'), 0) AS totalAbonos,
-        COALESCE((SELECT SUM(md.Valor) FROM movimientos_deuda md WHERE md.idDeuda = d.idDeuda AND md.Tipo <> 'Abono'), 0) AS totalCargos
+    $pesos = sqlSoloPesosDeuda();
+    return "SELECT d.*, " . sqlSaldoDeuda('COP') . " AS saldoActual, " . sqlSaldoDeuda('USD') . " AS saldoUsd,
+        COALESCE((SELECT SUM(md.Valor) FROM movimientos_deuda md WHERE md.idDeuda = d.idDeuda AND md.Tipo = 'Abono'$pesos), 0) AS totalAbonos,
+        COALESCE((SELECT SUM(md.Valor) FROM movimientos_deuda md WHERE md.idDeuda = d.idDeuda AND md.Tipo <> 'Abono'$pesos), 0) AS totalCargos
         FROM deudas d $filtro ORDER BY d.Activa DESC, d.Tipo, d.Nombre";
 }
 
@@ -96,6 +99,8 @@ function formatearDeuda($f) {
         'acreedor' => $f['Acreedor'],
         'saldoInicial' => (float)$f['SaldoInicial'],
         'saldoActual' => $saldo,
+        'saldoUsd' => round((float)($f['saldoUsd'] ?? 0), 2),
+        'saldoInicialUsd' => (float)($f['SaldoInicialUsd'] ?? 0),
         'cupoTotal' => $cupo,
         'cupoDisponible' => $cupo !== null ? round($cupo - $saldo, 2) : null,
         'diaCorte' => $f['DiaCorte'] !== null ? (int)$f['DiaCorte'] : null,
@@ -117,7 +122,7 @@ function formatearDeuda($f) {
 // Deuda del usuario autenticado (null si no existe o es de otro usuario).
 function deudaDelUsuario($id) {
     global $mysql, $uid;
-    $q = $mysql->prepare("SELECT idDeuda FROM deudas WHERE idDeuda = ? AND IdUsuario = ?");
+    $q = $mysql->prepare("SELECT idDeuda, Tipo FROM deudas WHERE idDeuda = ? AND IdUsuario = ?");
     $q->bind_param('ii', $id, $uid);
     $q->execute();
     return $q->get_result()->fetch_assoc() ?: null;
@@ -141,7 +146,8 @@ function detalleDeuda($id) {
     $deuda = formatearDeuda($f);
 
     // Los abonos hechos desde el presupuesto traen su gasto, categoría y mes (movimientos -> gastos -> presupuestos).
-    $stmt = $mysql->prepare("SELECT md.idMovDeuda, md.Tipo, md.Valor, md.Fecha, md.Nota, md.idMovimiento,
+    $colMoneda = deudaTieneMoneda() ? "md.Moneda" : "'COP'";
+    $stmt = $mysql->prepare("SELECT md.idMovDeuda, md.Tipo, md.Valor, $colMoneda AS Moneda, md.Fecha, md.Nota, md.idMovimiento,
             g.NombreGasto AS gasto, c.NombreCategoria AS categoria, p.Mes AS mesP, p.Anho AS anhoP
         FROM movimientos_deuda md
         INNER JOIN deudas d ON d.idDeuda = md.idDeuda
@@ -153,7 +159,7 @@ function detalleDeuda($id) {
     $stmt->bind_param('ii', $id, $uid);
     $stmt->execute();
     $deuda['movimientos'] = array_map(function ($m) {
-        return ['idMovDeuda' => (int)$m['idMovDeuda'], 'tipo' => $m['Tipo'], 'valor' => (float)$m['Valor'],
+        return ['idMovDeuda' => (int)$m['idMovDeuda'], 'tipo' => $m['Tipo'], 'valor' => (float)$m['Valor'], 'moneda' => $m['Moneda'],
                 'fecha' => $m['Fecha'], 'nota' => $m['Nota'], 'desdePresupuesto' => $m['idMovimiento'] !== null,
                 'gasto' => $m['gasto'], 'categoria' => $m['categoria'],
                 'mes' => $m['mesP'] !== null ? (int)$m['mesP'] : null, 'anho' => $m['anhoP'] !== null ? (int)$m['anhoP'] : null];
@@ -186,6 +192,20 @@ function gastosVinculadosDeuda($idDeuda, $fecha = null) {
     }, $filas);
 }
 
+// Saldo inicial en dólares (solo tarjetas; migración 018). Sin migrar se ignora salvo que pidan un valor mayor que cero.
+function guardarSaldoInicialUsd($idDeuda, $d) {
+    global $mysql, $uid;
+    if (!array_key_exists('saldoInicialUsd', $d)) return;
+    $v = numeroOpcional($d['saldoInicialUsd']) ?? 0;
+    if (!deudaTieneMoneda()) {
+        if ((float)$v > 0) throw new RuntimeException('Falta ejecutar la migración 018 (monedas en deudas). No se guardó el saldo en dólares.');
+        return;
+    }
+    $q = $mysql->prepare("UPDATE deudas SET SaldoInicialUsd = ? WHERE idDeuda = ? AND IdUsuario = ?");
+    $q->bind_param('dii', $v, $idDeuda, $uid);
+    $q->execute();
+}
+
 function procesarDeuda($d) {
     global $mysql, $uid;
     $accion = $d['accion'] ?? '';
@@ -194,6 +214,9 @@ function procesarDeuda($d) {
             case 'crear':
             case 'actualizar':
                 if ($e = validarDeuda($d)) { echo json_encode(['error' => $e]); return; }
+                if ((float)(numeroOpcional($d['saldoInicialUsd'] ?? null) ?? 0) > 0 && !deudaTieneMoneda()) {
+                    echo json_encode(['error' => 'Falta ejecutar la migración 018 (monedas en deudas) en la base de datos.']); return;
+                }
                 $cupo = numeroOpcional($d['cupoTotal'] ?? null);
                 $corte = numeroOpcional($d['diaCorte'] ?? null);
                 $pago = numeroOpcional($d['diaPago'] ?? null);
@@ -208,7 +231,9 @@ function procesarDeuda($d) {
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                     $stmt->bind_param('sssddiiddsisi', $d['nombre'], $d['tipo'], $acreedor, $d['saldoInicial'], $cupo, $corte, $pago, $tasa, $cuota, $fin, $activa, $notas, $uid);
                     $stmt->execute();
-                    echo json_encode(['id' => $mysql->insert_id]);
+                    $idNueva = $mysql->insert_id;
+                    guardarSaldoInicialUsd($idNueva, $d);
+                    echo json_encode(['id' => $idNueva]);
                 } else {
                     $idDeuda = appfinanzas_entero($d['idDeuda'] ?? null);
                     if ($idDeuda === null) { echo json_encode(['error' => 'Identificador de deuda no válido']); return; }
@@ -216,6 +241,7 @@ function procesarDeuda($d) {
                     $stmt = $mysql->prepare("UPDATE deudas SET Nombre=?, Tipo=?, Acreedor=?, SaldoInicial=?, CupoTotal=?, DiaCorte=?, DiaPago=?, TasaAnual=?, CuotaMensual=?, FechaFin=?, Activa=?, Notas=? WHERE idDeuda=? AND IdUsuario=?");
                     $stmt->bind_param('sssddiiddsisii', $d['nombre'], $d['tipo'], $acreedor, $d['saldoInicial'], $cupo, $corte, $pago, $tasa, $cuota, $fin, $activa, $notas, $idDeuda, $uid);
                     $stmt->execute();
+                    guardarSaldoInicialUsd($idDeuda, $d);
                     echo json_encode(['updated' => true]);
                 }
                 break;
@@ -243,11 +269,18 @@ function procesarDeuda($d) {
                 $fecha = $d['fecha'] ?? date('Y-m-d');
                 if (!appfinanzas_fecha_valida($fecha)) { echo json_encode(['error' => 'La fecha no es válida (use AAAA-MM-DD)']); return; }
                 $nota = $d['nota'] ?? null;
-                if (!deudaDelUsuario($id)) { echo json_encode(['error' => 'La deuda no existe']); return; }
+                $moneda = strtoupper(trim((string)($d['moneda'] ?? 'COP')));
+                if (!in_array($moneda, ['COP', 'USD'], true)) { echo json_encode(['error' => 'Moneda no válida']); return; }
+                $deudaFila = deudaDelUsuario($id);
+                if (!$deudaFila) { echo json_encode(['error' => 'La deuda no existe']); return; }
+                if ($moneda === 'USD') {
+                    if (!deudaTieneMoneda()) { echo json_encode(['error' => 'Falta ejecutar la migración 018 (monedas en deudas) en la base de datos.']); return; }
+                    if (($deudaFila['Tipo'] ?? '') !== 'Tarjeta') { echo json_encode(['error' => 'Solo las tarjetas de crédito admiten movimientos en dólares']); return; }
+                }
                 // Un abono se refleja en el presupuesto: se registra como movimiento del gasto vinculado a la deuda
                 // (idGasto explícito; -1 = no asociar; sin idGasto = el gasto de la deuda en el mes de la fecha, si existe).
                 $avisoPresupuesto = null;
-                if ($d['tipo'] === 'Abono') {
+                if ($d['tipo'] === 'Abono' && $moneda === 'COP') { // los abonos en dólares no pasan al presupuesto (está en pesos)
                     $idGasto = array_key_exists('idGasto', $d) ? appfinanzas_entero($d['idGasto']) : null;
                     if ($idGasto !== -1 && ($idGasto === null || $idGasto <= 0)) {
                         $vinculados = gastosVinculadosDeuda($id, $fecha);
@@ -285,10 +318,46 @@ function procesarDeuda($d) {
                         break;
                     }
                 }
-                $stmt = $mysql->prepare("INSERT INTO movimientos_deuda (idDeuda, Tipo, Valor, Fecha, Nota) VALUES (?, ?, ?, ?, ?)");
-                $stmt->bind_param('isdss', $id, $d['tipo'], $d['valor'], $fecha, $nota);
+                if (deudaTieneMoneda()) {
+                    $stmt = $mysql->prepare("INSERT INTO movimientos_deuda (idDeuda, Tipo, Valor, Fecha, Nota, Moneda) VALUES (?, ?, ?, ?, ?, ?)");
+                    $stmt->bind_param('isdsss', $id, $d['tipo'], $d['valor'], $fecha, $nota, $moneda);
+                } else {
+                    $stmt = $mysql->prepare("INSERT INTO movimientos_deuda (idDeuda, Tipo, Valor, Fecha, Nota) VALUES (?, ?, ?, ?, ?)");
+                    $stmt->bind_param('isdss', $id, $d['tipo'], $d['valor'], $fecha, $nota);
+                }
                 $stmt->execute();
                 echo json_encode(['id' => $mysql->insert_id, 'enPresupuesto' => false, 'aviso' => $avisoPresupuesto]);
+                break;
+
+            case 'actualizarMovimiento': // corregir un movimiento manual (valor, fecha, nota o tipo) sin tener que borrarlo
+                $id = appfinanzas_entero($d['idMovDeuda'] ?? null);
+                if ($id === null) { echo json_encode(['error' => 'Identificador no válido']); return; }
+                if (!in_array($d['tipo'] ?? '', TIPOS_MOVIMIENTO_DEUDA, true)) { echo json_encode(['error' => 'Tipo de movimiento no válido']); return; }
+                if (!appfinanzas_monto_valido($d['valor'] ?? null) || $d['valor'] <= 0) { echo json_encode(['error' => 'El valor no es válido']); return; }
+                $fecha = $d['fecha'] ?? '';
+                if (!appfinanzas_fecha_valida($fecha)) { echo json_encode(['error' => 'La fecha no es válida (use AAAA-MM-DD)']); return; }
+                $nota = isset($d['nota']) && trim((string)$d['nota']) !== '' ? mb_substr(trim($d['nota']), 0, 250, 'UTF-8') : null;
+                $q = $mysql->prepare("SELECT md.idMovimiento FROM movimientos_deuda md INNER JOIN deudas d ON d.idDeuda = md.idDeuda
+                    WHERE md.idMovDeuda = ? AND d.IdUsuario = ?");
+                $q->bind_param('ii', $id, $uid);
+                $q->execute();
+                $fila = $q->get_result()->fetch_assoc();
+                if (!$fila) { echo json_encode(['error' => 'El movimiento no existe']); return; }
+                // Los abonos que vienen del presupuesto se corrigen en el movimiento del gasto.
+                if ($fila['idMovimiento'] !== null) { echo json_encode(['error' => 'Este abono viene del presupuesto: corrígelo en el movimiento del gasto']); return; }
+                if (deudaTieneMoneda() && isset($d['moneda'])) {
+                    $moneda = strtoupper(trim((string)$d['moneda']));
+                    if (!in_array($moneda, ['COP', 'USD'], true)) { echo json_encode(['error' => 'Moneda no válida']); return; }
+                    $stmt = $mysql->prepare("UPDATE movimientos_deuda md INNER JOIN deudas d ON d.idDeuda = md.idDeuda
+                        SET md.Tipo = ?, md.Valor = ?, md.Fecha = ?, md.Nota = ?, md.Moneda = ? WHERE md.idMovDeuda = ? AND md.idMovimiento IS NULL AND d.IdUsuario = ?");
+                    $stmt->bind_param('sdsssii', $d['tipo'], $d['valor'], $fecha, $nota, $moneda, $id, $uid);
+                } else {
+                    $stmt = $mysql->prepare("UPDATE movimientos_deuda md INNER JOIN deudas d ON d.idDeuda = md.idDeuda
+                        SET md.Tipo = ?, md.Valor = ?, md.Fecha = ?, md.Nota = ? WHERE md.idMovDeuda = ? AND md.idMovimiento IS NULL AND d.IdUsuario = ?");
+                    $stmt->bind_param('sdssii', $d['tipo'], $d['valor'], $fecha, $nota, $id, $uid);
+                }
+                $stmt->execute();
+                echo json_encode(['updated' => true]);
                 break;
 
             case 'eliminarMovimiento':
@@ -305,6 +374,8 @@ function procesarDeuda($d) {
             default:
                 echo json_encode(['error' => 'Acción no válida']);
         }
+    } catch (RuntimeException $e) {
+        echo json_encode(['error' => $e->getMessage()]);
     } catch (mysqli_sql_exception $e) {
         error_log('[AppFinanzas] Deudas: ' . $e->getMessage());
         echo json_encode(['error' => 'Error al procesar la deuda']);

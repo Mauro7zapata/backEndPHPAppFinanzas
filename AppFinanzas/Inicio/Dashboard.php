@@ -85,7 +85,7 @@ if ($p) {
     $presupuesto['abiertos'] = resumenCierrePresupuesto($idPresupuesto)['abiertos'];
 
     $stmt = $mysql->prepare("SELECT e.NombreEstado AS estado, COUNT(*) AS n,
-            COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(" . sqlValorEfectivoGasto() . "),0) AS pagado
+            COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(" . sqlValorEfectivoGasto() . "),0) AS pagado, COALESCE(SUM(" . sqlSeparadoGasto() . "),0) AS separado
         FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = ?
         WHERE g.idPresupuesto = ? GROUP BY e.NombreEstado");
     $stmt->bind_param('ii', $uid, $idPresupuesto);
@@ -94,9 +94,9 @@ if ($p) {
         $presupuesto['gastosTotal'] += (int)$f['n'];
         $presupuesto['previsto'] += (float)$f['previsto'];
         $presupuesto['pagado'] += (float)$f['pagado'];
-        if (in_array($f['estado'], ['Guardado', 'Acumulado'], true)) $presupuesto['ahorrado'] += (float)$f['pagado'];
-        if ($f['estado'] === 'Guardado') { $presupuesto['guardado'] += (float)$f['pagado']; $presupuesto['guardadoPrevisto'] += (float)$f['previsto']; }
-        if ($f['estado'] === 'Acumulado') { $presupuesto['acumulado'] += (float)$f['pagado']; $presupuesto['acumuladoPrevisto'] += (float)$f['previsto']; }
+        if (in_array($f['estado'], ['Guardado', 'Acumulado'], true)) $presupuesto['ahorrado'] += (float)$f['separado'];
+        if ($f['estado'] === 'Guardado') { $presupuesto['guardado'] += (float)$f['separado']; $presupuesto['guardadoPrevisto'] += (float)$f['previsto']; }
+        if ($f['estado'] === 'Acumulado') { $presupuesto['acumulado'] += (float)$f['separado']; $presupuesto['acumuladoPrevisto'] += (float)$f['previsto']; }
         if ($f['estado'] === 'Pendiente') $presupuesto['pendientes'] += (int)$f['n'];
         if ($f['estado'] === 'En proceso') $presupuesto['enProceso'] += (int)$f['n'];
         if ($f['estado'] === 'Pagado') $presupuesto['pagados'] += (int)$f['n'];
@@ -164,7 +164,7 @@ $tendencia = array_map(function ($t) { return ['mes' => $t['mes'], 'gastado' => 
 // ------------------------------------------------------------------ deudas
 $deudas = ['total' => 0.0, 'tarjetas' => 0.0, 'prestamos' => 0.0, 'informales' => 0.0, 'cantidad' => 0, 'proximoPago' => null, 'cupoUsado' => null];
 $agenda = [];
-$stmt = $mysql->prepare("SELECT d.*, " . SQL_SALDO_DEUDA . " AS saldo FROM deudas d WHERE d.IdUsuario = ? AND d.Activa = 1");
+$stmt = $mysql->prepare("SELECT d.*, " . sqlSaldoDeuda() . " AS saldo FROM deudas d WHERE d.IdUsuario = ? AND d.Activa = 1");
 $stmt->bind_param('i', $uid);
 $stmt->execute();
 $cupoTotal = 0.0; $cupoUsado = 0.0;

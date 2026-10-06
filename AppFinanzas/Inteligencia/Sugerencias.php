@@ -78,12 +78,12 @@ $cats = []; $catsAnt = [];
 if ($p) {
     $idP = (int)$p['idPresupuesto'];
     $total = (float)$p['total'];
-    $s = $mysql->prepare("SELECT e.NombreEstado AS estado, COUNT(*) AS n, COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(" . sqlValorEfectivoGasto() . "),0) AS pagado
+    $s = $mysql->prepare("SELECT e.NombreEstado AS estado, COUNT(*) AS n, COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(" . sqlValorEfectivoGasto() . "),0) AS pagado, COALESCE(SUM(" . sqlSeparadoGasto() . "),0) AS separado
         FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = ? WHERE g.idPresupuesto = ? GROUP BY e.NombreEstado");
     $s->bind_param('ii', $uid, $idP); $s->execute();
     foreach ($s->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
         $nGastos += (int)$f['n']; $previsto += (float)$f['previsto']; $pagado += (float)$f['pagado'];
-        if (in_array($f['estado'], ['Guardado', 'Acumulado'], true)) $ahorrado += (float)$f['pagado'];
+        if (in_array($f['estado'], ['Guardado', 'Acumulado'], true)) $ahorrado += (float)$f['separado'];
         if ($f['estado'] === 'Pagado') $nPagados += (int)$f['n'];
     }
     $consumo = $pagado - $ahorrado;
@@ -192,7 +192,7 @@ if ($p && $total > 0) {
 }
 
 // ------------------------------------------------------------------ 6) deudas y tarjetas
-$s = $mysql->prepare("SELECT d.idDeuda, d.Nombre, d.Tipo, d.CupoTotal, d.TasaAnual, d.CuotaMensual, " . SQL_SALDO_DEUDA . " AS saldo FROM deudas d WHERE d.IdUsuario = ? AND d.Activa = 1");
+$s = $mysql->prepare("SELECT d.idDeuda, d.Nombre, d.Tipo, d.CupoTotal, d.TasaAnual, d.CuotaMensual, " . sqlSaldoDeuda() . " AS saldo FROM deudas d WHERE d.IdUsuario = ? AND d.Activa = 1");
 $s->bind_param('i', $uid); $s->execute();
 $deudas = $s->get_result()->fetch_all(MYSQLI_ASSOC); $s->close();
 $conTasa = [];

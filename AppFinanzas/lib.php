@@ -58,8 +58,9 @@ function appfinanzas_gasto_es_propio($idGasto) {
 //  - suma >= costo previsto  -> Pagado (y se registra la fecha de pago)
 //  - suma > 0 y < costo previsto     -> En proceso
 //  - suma = 0 (se borraron los movimientos) -> vuelve a Pendiente
-// Solo toca gastos que están en Pendiente / En proceso / Pagado: los estados
-// Guardado, Acumulado y No aplica los decide el usuario y no se modifican.
+// Guardado: los movimientos son lo que ya gastaste de lo guardado. Sigue en Guardado mientras quede algo
+// apartado y pasa a Pagado al completar el valor; si el pago se deshace y el gasto tenía lugar de guardado, vuelve a Guardado.
+// Acumulado y No aplica los decide el usuario y no se modifican (en Acumulado los movimientos son ahorro, no gasto).
 function sincronizarGasto($idGasto) {
     sincronizarGastoEstado($idGasto);
     evaluarCierrePorGasto($idGasto); // el presupuesto puede quedar Finalizado (o reabrirse) según cómo quedaron sus gastos
@@ -70,7 +71,8 @@ function sincronizarGastoEstado($idGasto) {
     $idGasto = (int)$idGasto;
     if ($idGasto <= 0) return;
 
-    $stmt = $mysql->prepare("SELECT g.CostoPrevisto, g.IdEstado, e.NombreEstado,
+    $colLugar = gastosTieneLugar() ? "g.idLugar" : "NULL";
+    $stmt = $mysql->prepare("SELECT g.CostoPrevisto, g.IdEstado, e.NombreEstado, $colLugar AS lugar,
             (SELECT COALESCE(SUM(m.valorMovimiento),0) FROM movimientos m WHERE m.idGasto = g.idGastos) AS total,
             (SELECT MAX(m.fechaMovimiento) FROM movimientos m WHERE m.idGasto = g.idGastos) AS ultima
         FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado
@@ -79,7 +81,7 @@ function sincronizarGastoEstado($idGasto) {
     $stmt->bind_param('ii', $idGasto, $uid);
     $stmt->execute();
     $g = $stmt->get_result()->fetch_assoc();
-    if (!$g || !in_array($g['NombreEstado'], ['Pendiente', 'En proceso', 'Pagado'], true)) return;
+    if (!$g || !in_array($g['NombreEstado'], ['Pendiente', 'En proceso', 'Pagado', 'Guardado'], true)) return;
 
     $total = (float)$g['total'];
     $previsto = (float)$g['CostoPrevisto'];
@@ -90,6 +92,17 @@ function sincronizarGastoEstado($idGasto) {
     } else {
         $nuevo = 'En proceso';
     }
+    if ($g['NombreEstado'] === 'Guardado') {
+        // Pago parcial de lo guardado: sigue Guardado (se anota lo gastado); al completar el valor pasa a Pagado.
+        if ($nuevo !== 'Pagado') {
+            $q = $mysql->prepare("UPDATE gastos SET CostoReal = ? WHERE idGastos = ?");
+            $q->bind_param('di', $total, $idGasto);
+            $q->execute();
+            return;
+        }
+    } elseif ($g['NombreEstado'] === 'Pagado' && $nuevo !== 'Pagado' && $g['lugar'] !== null) {
+        $nuevo = 'Guardado'; // se deshizo un pago de algo que estaba guardado: lo no gastado vuelve a estar guardado
+    }
     $est = estadoGastoPorNombre($nuevo);
     if (!$est) return;
 
@@ -98,7 +111,7 @@ function sincronizarGastoEstado($idGasto) {
     if ($nuevo === 'Pagado') {
         $stmt = $mysql->prepare("UPDATE gastos SET IdEstado = ?, CostoReal = ?, FechaPago = ? WHERE idGastos = ?");
         $stmt->bind_param('idsi', $est, $total, $g['ultima'], $idGasto);
-    } elseif ($nuevo === 'En proceso') {
+    } elseif ($nuevo === 'En proceso' || $nuevo === 'Guardado') {
         $stmt = $mysql->prepare("UPDATE gastos SET IdEstado = ?, CostoReal = ? WHERE idGastos = ?");
         $stmt->bind_param('idi', $est, $total, $idGasto);
     } else {
@@ -189,8 +202,36 @@ function registrarPagoGasto($idGasto, $observaciones = null) {
 
 // ---------------------------------------------------------------- Deudas
 
-const SQL_SALDO_DEUDA = "(d.SaldoInicial
-    + COALESCE((SELECT SUM(CASE WHEN md.Tipo = 'Abono' THEN -md.Valor ELSE md.Valor END) FROM movimientos_deuda md WHERE md.idDeuda = d.idDeuda), 0))";
+// Migración 018: monedas en las deudas (movimientos_deuda.Moneda y deudas.SaldoInicialUsd). Sin ella todo es COP.
+function deudaTieneMoneda() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE()
+            AND ((table_name = 'movimientos_deuda' AND column_name = 'Moneda') OR (table_name = 'deudas' AND column_name = 'SaldoInicialUsd'))");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] >= 2;
+    }
+    return $tiene;
+}
+
+// Saldo de una deuda (alias d) en una moneda: saldo inicial + cargos + intereses - abonos de esa moneda.
+// El saldo en pesos NUNCA incluye movimientos en dólares (no se convierten ni se suman).
+function sqlSaldoDeuda($moneda = 'COP') {
+    $tiene = deudaTieneMoneda();
+    if ($moneda === 'USD') {
+        if (!$tiene) return "0";
+        $inicial = "d.SaldoInicialUsd"; $filtro = " AND md.Moneda = 'USD'";
+    } else {
+        $inicial = "d.SaldoInicial"; $filtro = $tiene ? " AND md.Moneda = 'COP'" : "";
+    }
+    return "($inicial + COALESCE((SELECT SUM(CASE WHEN md.Tipo = 'Abono' THEN -md.Valor ELSE md.Valor END)
+        FROM movimientos_deuda md WHERE md.idDeuda = d.idDeuda$filtro), 0))";
+}
+
+// Condición SQL para limitar sumas de movimientos_deuda (alias md) a pesos; vacía sin la migración 018.
+function sqlSoloPesosDeuda() {
+    return deudaTieneMoneda() ? " AND md.Moneda = 'COP'" : "";
+}
 
 // Próxima fecha (Y-m-d) en que cae el día $dia (1-31) a partir de hoy, ajustando a meses cortos. null si no hay día.
 function proximaFechaDia($dia, $desde = null) {
@@ -258,6 +299,13 @@ function sqlValorEfectivoGasto($g = 'g', $e = 'e') {
     return "(CASE WHEN $e.NombreEstado = 'Guardado' THEN GREATEST($g.valorGastosMovimiento, $g.CostoPrevisto) ELSE $g.valorGastosMovimiento END)";
 }
 
+// Lo que un gasto aporta al saldo separado: Guardado = lo apartado que aún no se ha gastado (previsto - movimientos);
+// Acumulado = lo juntado (movimientos); otros estados no separan nada.
+function sqlSeparadoGasto($g = 'g', $e = 'e') {
+    return "(CASE WHEN $e.NombreEstado = 'Guardado' THEN GREATEST($g.CostoPrevisto - $g.valorGastosMovimiento, 0)
+        WHEN $e.NombreEstado = 'Acumulado' THEN $g.valorGastosMovimiento ELSE 0 END)";
+}
+
 // true si existe la tabla separado_usos (migración 014). Sin ella el saldo separado = lo aportado.
 function separadoTieneUsos() {
     global $mysql;
@@ -270,14 +318,14 @@ function separadoTieneUsos() {
 }
 
 // Saldo separado por lugar (clave 0 = «sin lugar»), de todos los meses:
-//   saldo = aportado (movimientos de gastos Guardado/Acumulado) + ajustes - usado.
+//   saldo = separado (Guardado: lo no gastado; Acumulado: movimientos) + ajustes - usado.
 // Cada elemento: guardado, acumulado, usado, ajuste, gastos, saldo.
 function saldoSeparadoPorLugar() {
     global $mysql, $uid;
     $vacio = function () { return ['guardado' => 0.0, 'acumulado' => 0.0, 'usado' => 0.0, 'ajuste' => 0.0, 'gastos' => 0, 'saldo' => 0.0]; };
     $lugares = [];
     $colLugar = gastosTieneLugar() ? "COALESCE(g.idLugar, 0)" : "0";
-    $q = $mysql->prepare("SELECT $colLugar AS l, e.NombreEstado AS est, COALESCE(SUM(" . sqlValorEfectivoGasto() . "), 0) AS t, COUNT(*) AS n
+    $q = $mysql->prepare("SELECT $colLugar AS l, e.NombreEstado AS est, COALESCE(SUM(" . sqlSeparadoGasto() . "), 0) AS t, COUNT(*) AS n
         FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
         INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = p.IdUsuario
         WHERE p.IdUsuario = ? AND e.NombreEstado IN ('Guardado', 'Acumulado') GROUP BY l, e.NombreEstado");
