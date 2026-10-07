@@ -7,6 +7,10 @@
  *   php -r "echo bin2hex(random_bytes(16)), PHP_EOL;"
  */
 return [
+    // Ambiente de este servidor: 'dev' o 'prd'. Cada carpeta (DEV/BackEnd_PresupuestosApp y PRD/BackEnd_PresupuestosApp)
+    // tiene su propio config.local.php con SU base de datos; así los datos de pruebas nunca tocan los reales.
+    'ambiente' => 'prd',
+
     'host'     => 'localhost',
     'user'     => 'USUARIO_BD',
     'password' => 'CLAVE_BD',

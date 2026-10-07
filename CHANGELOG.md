@@ -1,5 +1,8 @@
 # Changelog · Backend
 
+## 2026-10-07 · Ambientes DEV y PRD
+- Carpetas `/DEV/BackEnd_PresupuestosApp` y `/PRD/BackEnd_PresupuestosApp`, cada una con su `config.local.php` (BD propia). `config.example.php` suma `'ambiente'`; `db.php` envía la cabecera `X-Ambiente`. Guía completa en `AMBIENTES.md`. La ruta anterior `/github/AppFinanzas/` queda sin uso: mantenla mientras haya teléfonos con la app vieja.
+
 ## 2026-10-05 (18) · Inversiones en COP/USD y saldo separado con usos
 **Requiere `sql/013_moneda_inversiones.sql` y `sql/014_saldo_separado.sql` (con respaldo; la 013 necesita la 011 y la 014 la 012).** Antes de migrar todo sigue funcionando.
 - **Moneda** (`013`): `Inversiones.Moneda` y `fondo_inversion.Moneda` (COP por defecto); importes de inversiones a DECIMAL(15,2). `libInversiones.php`: `invCalcularResumen($hoy, $moneda)` filtra por moneda (las monedas no se mezclan), `invRedondear` (COP entero, USD centavos), fondo por moneda; `Resumen.php`/`Fondo.php` aceptan `moneda`; `inversion.php` fija la moneda solo al crear y la devuelve; Inicio y alertas incluyen `moneda` en los cobros. El KPI de Inicio sigue siendo solo COP.
