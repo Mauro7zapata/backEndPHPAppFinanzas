@@ -3,17 +3,17 @@
 | | DEV | PRD |
 |---|---|---|
 | Carpeta en Hostinger | `/DEV/BackEnd_PresupuestosApp` | `/PRD/BackEnd_PresupuestosApp` |
-| URL | `https://<dominio>/DEV/BackEnd_PresupuestosApp/` | `https://<dominio>/PRD/BackEnd_PresupuestosApp/` |
+| URL | `https://<dominio>/DEV/BackEnd_PresupuestosApp/AppFinanzas/` | `https://<dominio>/PRD/BackEnd_PresupuestosApp/AppFinanzas/` |
 | Base de datos | `..._dev` (copia de pruebas) | la real |
 | `config.local.php` | propio, `'ambiente' => 'dev'` | propio, `'ambiente' => 'prd'` |
 | App Android | variante `dev` (app «Presupuesto DEV», paquete `.dev`) | variante `prd` |
 
-Dentro de cada carpeta va **el contenido de `AppFinanzas/`** (Auth/, Deudas/, db.php, lib.php…).
+Dentro de cada `BackEnd_PresupuestosApp` va la carpeta `AppFinanzas/` completa (Auth/, Deudas/, db.php, lib.php, config.local.php…); la app apunta a esa subcarpeta.
 
 ## Montar el ambiente DEV (una vez)
 1. Crea en Hostinger una base de datos nueva (p. ej. `..._presupuesto_dev`) y su usuario.
 2. Copia la estructura de PRD: exporta PRD (phpMyAdmin → Exportar, «solo estructura» o con datos de prueba) e impórtala en la de DEV. Luego aplica ahí las migraciones nuevas.
-3. Sube el código a `/DEV/BackEnd_PresupuestosApp` y copia `config.example.php` como `config.local.php` con los datos de la BD **de DEV**, `'ambiente' => 'dev'` y un `codigo_cuenta_inicial` distinto.
+3. Sube el código a `/DEV/BackEnd_PresupuestosApp/AppFinanzas` y copia `config.example.php` como `config.local.php` con los datos de la BD **de DEV**, `'ambiente' => 'dev'` y un `codigo_cuenta_inicial` distinto.
 4. Verifica: cualquier endpoint responde con la cabecera `X-Ambiente: dev`.
 
 ## Flujo de trabajo
