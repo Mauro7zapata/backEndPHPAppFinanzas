@@ -42,6 +42,8 @@ if (!is_file($rutaConfig)) {
 }
 $config = require $rutaConfig;
 $GLOBALS['appfinanzas_depurar'] = !empty($config['depurar']);
+// Ambiente informado en cada respuesta (X-Ambiente) para comprobar a qué servidor está hablando la app.
+if (!headers_sent()) header('X-Ambiente: ' . preg_replace('/[^a-z]/', '', strtolower((string)($config['ambiente'] ?? 'prd'))));
 foreach (['host', 'user', 'password', 'db'] as $clave) {
     if (!isset($config[$clave]) || $config[$clave] === '') {
         error_log('[AppFinanzas] Configuración incompleta, falta: ' . $clave);
