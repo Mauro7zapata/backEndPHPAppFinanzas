@@ -1,5 +1,15 @@
 # Changelog · Backend
 
+
+## 2026-10-11 — Código de administrador para exportar y gestionar reportes
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Acceso de administrador | AppFinanzas/Configuracion/Comentarios.php | Acciones POST `admin_validar`, `admin_listar` (todos los reportes con versión, dispositivo, ambiente e imágenes) y `admin_estado` (cambia estado y respuesta). El código se compara con `config.local.php → codigo_admin_sha256` (SHA-256, comparación en tiempo constante) | Solo el dueño debe poder exportar los reportes y cambiar sus estados | Sin migración. Si la clave no existe, la administración queda desactivada |
+| Imágenes para el administrador | Comentarios.php (`enviarImagen`) | Con la cabecera `X-Codigo-Admin` válida se pueden descargar las imágenes de cualquier reporte; sin ella, solo las propias (como antes) | Poder exportar imágenes junto al texto | La privacidad de usuarios normales no cambia |
+| Protección | Comentarios.php | Máx. 5 códigos erróneos cada 15 min por usuario (archivo temporal), retardo de 0,8 s por fallo y mensaje de bloqueo | Evitar adivinar el código | — |
+| Auditoría | Comentarios.php | Cada validación, listado y cambio de estado escribe `[AppFinanzas][AUDITORIA]` en el log (usuario, reporte, estado anterior → nuevo) | Trazabilidad | Se ve en `error_log` |
+| Configuración | config.example.php, config.local.php | Nueva clave `codigo_admin_sha256` | Guardar solo el hash | **Subir `config.local.php` a DEV y PRD** (no va a git) |
+
 ## 2026-10-11 · Tablero de la comunidad en Sugerencias y errores
 **Requiere ejecutar `sql/022_comentarios_comunidad.sql` (con copia de seguridad).**
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |

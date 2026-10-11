@@ -15,8 +15,12 @@ header('Content-Type: application/json; charset=utf-8');
 //        apoyos (cuántos dicen «a mí también»), yoApoyo, mio, reaperturas. POST: apoyar {idComentario, nota?} | quitarApoyo {idComentario}
 //        | reabrir {idComentario, nota?} (solo reportes Resuelto/Descartado; pasan a «Nuevo») | visibilidad {idComentario, publico} (solo el dueño).
 //        crear acepta publico (por defecto 1). Las imágenes solo las ve el dueño.
-//   GET  Comentarios.php?imagen=ID -> bytes de la imagen (solo si el reporte es del usuario)
+//   GET  Comentarios.php?imagen=ID -> bytes de la imagen (solo si el reporte es del usuario, o con cabecera X-Codigo-Admin válida)
 //        La lista incluye imagenes:[ids] por reporte.
+//   Administración (el código se valida contra config.local.php -> codigo_admin_sha256):
+//        POST admin_validar {codigo} | admin_listar {codigo, estado?} (TODOS los reportes con versión, dispositivo, ambiente e imágenes)
+//        | admin_estado {codigo, idComentario, estado, respuesta?} (cambia el estado y, si se envía, la respuesta).
+//        Máx. 5 códigos erróneos cada 15 minutos por usuario; cada acción de administrador queda en el log (AUDITORIA).
 
 define('MSG_MIGRACION_019', 'Falta ejecutar la migración 019 en la base de datos');
 const COMENTARIOS_TIPOS = ['Mejora', 'Error'];
@@ -53,11 +57,100 @@ function validarImagenes($crudas) {
     return [$lista, null];
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Administración: un código largo (solo lo conoce el dueño de la app) habilita ver/exportar todos los reportes y
+// cambiar su estado. En config.local.php solo se guarda su hash SHA-256. Los intentos fallidos se limitan por usuario.
+// ---------------------------------------------------------------------------------------------
+const COMENTARIOS_ESTADOS = ['Nuevo', 'En revision', 'Planeado', 'Resuelto', 'Descartado'];
+const ADMIN_MAX_FALLOS = 5;
+const ADMIN_VENTANA_SEG = 900; // 15 minutos
+
+// Archivo temporal con los fallos recientes del usuario: [marcas de tiempo]. No requiere migración.
+function adminArchivoFallos() {
+    global $uid;
+    return sys_get_temp_dir() . '/appfinanzas_admin_' . (int)$uid . '.json';
+}
+
+function adminFallosRecientes() {
+    $ruta = adminArchivoFallos();
+    $lista = is_file($ruta) ? json_decode((string)@file_get_contents($ruta), true) : [];
+    $limite = time() - ADMIN_VENTANA_SEG;
+    return array_values(array_filter(is_array($lista) ? $lista : [], function ($t) use ($limite) { return (int)$t >= $limite; }));
+}
+
+// true si el código es el de administrador. Devuelve false (y registra el fallo) si no; nunca revela por qué.
+function codigoAdminValido($codigo) {
+    global $config, $uid;
+    $esperado = strtolower((string)($config['codigo_admin_sha256'] ?? ''));
+    if ($esperado === '' || strlen($esperado) !== 64) return false;           // administración desactivada
+    $fallos = adminFallosRecientes();
+    if (count($fallos) >= ADMIN_MAX_FALLOS) return false;                      // bloqueado temporalmente
+    $codigo = strtoupper(trim((string)$codigo));
+    if ($codigo !== '' && hash_equals($esperado, hash('sha256', $codigo))) return true;
+    $fallos[] = time();
+    @file_put_contents(adminArchivoFallos(), json_encode($fallos), LOCK_EX);
+    error_log('[AppFinanzas][AUDITORIA] código de administrador incorrecto (usuario ' . (int)$uid . ', fallos recientes ' . count($fallos) . ')');
+    usleep(800000); // frena la adivinanza
+    return false;
+}
+
+// Mensaje cuando el código no sirve (distingue el bloqueo para que la persona sepa que debe esperar).
+function adminMensajeRechazo() {
+    return count(adminFallosRecientes()) >= ADMIN_MAX_FALLOS
+        ? 'Demasiados intentos. Espera 15 minutos e inténtalo de nuevo.'
+        : 'Código de administrador incorrecto';
+}
+
+// TODOS los reportes (de todos los usuarios) con los datos para reproducir errores y las ids de sus imágenes.
+function listarParaAdmin($estado) {
+    global $mysql;
+    $colPublico = columnaPublicoExiste() ? 'c.Publico' : '0';
+    $sql = "SELECT c.idComentario, c.IdUsuario, c.Tipo, c.Titulo, c.Descripcion, c.Estado, c.Respuesta, c.VersionApp, c.Dispositivo,
+            c.Ambiente, c.FechaCreacion, $colPublico AS Publico";
+    $sql .= tablaApoyosExiste()
+        ? ", (SELECT COUNT(*) FROM comentarios_apoyos a WHERE a.idComentario = c.idComentario AND a.Tipo = 'Tambien') AS apoyos,
+            (SELECT COUNT(*) FROM comentarios_apoyos a WHERE a.idComentario = c.idComentario AND a.Tipo = 'Reabrir') AS reaperturas"
+        : ", 0 AS apoyos, 0 AS reaperturas";
+    $sql .= " FROM comentarios_app c";
+    if ($estado !== null) $sql .= " WHERE c.Estado = ?";
+    $sql .= " ORDER BY (c.Estado IN ('Resuelto','Descartado')) ASC, c.idComentario DESC LIMIT 500";
+    $q = $mysql->prepare($sql);
+    if ($estado !== null) $q->bind_param('s', $estado);
+    $q->execute();
+    $filas = $q->get_result()->fetch_all(MYSQLI_ASSOC);
+    $imagenes = [];
+    if (tablaImagenesExiste()) {
+        foreach ($mysql->query("SELECT idImagen, idComentario FROM comentarios_app_imagenes ORDER BY idImagen")->fetch_all(MYSQLI_ASSOC) as $i) {
+            $imagenes[(int)$i['idComentario']][] = (int)$i['idImagen'];
+        }
+    }
+    return array_map(function ($f) use ($imagenes) {
+        return ['idComentario' => (int)$f['idComentario'], 'usuario' => (int)$f['IdUsuario'], 'tipo' => $f['Tipo'], 'titulo' => $f['Titulo'],
+            'descripcion' => $f['Descripcion'], 'estado' => $f['Estado'], 'respuesta' => $f['Respuesta'],
+            'version' => $f['VersionApp'], 'dispositivo' => $f['Dispositivo'], 'ambiente' => $f['Ambiente'],
+            'fecha' => substr($f['FechaCreacion'], 0, 10), 'publico' => (int)$f['Publico'] === 1, 'mio' => false,
+            'apoyos' => (int)$f['apoyos'], 'reaperturas' => (int)$f['reaperturas'], 'imagenes' => $imagenes[(int)$f['idComentario']] ?? []];
+    }, $filas);
+}
+
+function tablaApoyosExiste() {
+    global $mysql;
+    return $mysql->query("SHOW TABLES LIKE 'comentarios_apoyos'")->num_rows > 0;
+}
+
 function enviarImagen($id) {
     global $mysql, $uid;
-    $q = $mysql->prepare("SELECT i.Mime, i.Imagen FROM comentarios_app_imagenes i
-        INNER JOIN comentarios_app c ON c.idComentario = i.idComentario WHERE i.idImagen = ? AND c.IdUsuario = ?");
-    $q->bind_param('ii', $id, $uid);
+    // El administrador (cabecera X-Codigo-Admin) puede ver las imágenes de cualquier reporte; los demás, solo las suyas.
+    $admin = isset($_SERVER['HTTP_X_CODIGO_ADMIN']) && codigoAdminValido($_SERVER['HTTP_X_CODIGO_ADMIN']);
+    if ($admin) {
+        $q = $mysql->prepare("SELECT Mime, Imagen FROM comentarios_app_imagenes WHERE idImagen = ?");
+        $q->bind_param('i', $id);
+    } else {
+        $q = $mysql->prepare("SELECT i.Mime, i.Imagen FROM comentarios_app_imagenes i
+            INNER JOIN comentarios_app c ON c.idComentario = i.idComentario WHERE i.idImagen = ? AND c.IdUsuario = ?");
+        $q->bind_param('ii', $id, $uid);
+    }
     $q->execute();
     $f = $q->get_result()->fetch_assoc();
     if (!$f) { http_response_code(404); echo json_encode(['error' => 'No se encontró la imagen']); return; }
@@ -231,6 +324,43 @@ function procesarComentario($d) {
             $q->bind_param('iii', $pub, $id, $uid);
             $q->execute();
             echo json_encode(['publico' => $pub === 1]);
+            break;
+
+        case 'admin_validar':
+            if (!codigoAdminValido($d['codigo'] ?? '')) { echo json_encode(['error' => adminMensajeRechazo()]); return; }
+            error_log('[AppFinanzas][AUDITORIA] administrador validado (usuario ' . (int)$uid . ')');
+            echo json_encode(['ok' => true]);
+            break;
+
+        case 'admin_listar':
+            if (!codigoAdminValido($d['codigo'] ?? '')) { echo json_encode(['error' => adminMensajeRechazo()]); return; }
+            $estado = isset($d['estado']) && in_array($d['estado'], COMENTARIOS_ESTADOS, true) ? $d['estado'] : null;
+            $todos = listarParaAdmin($estado);
+            error_log('[AppFinanzas][AUDITORIA] administrador listó ' . count($todos) . ' reportes (usuario ' . (int)$uid . ')');
+            echo json_encode(['comentarios' => $todos]);
+            break;
+
+        case 'admin_estado':
+            if (!codigoAdminValido($d['codigo'] ?? '')) { echo json_encode(['error' => adminMensajeRechazo()]); return; }
+            $id = appfinanzas_entero($d['idComentario'] ?? null);
+            $estado = (string)($d['estado'] ?? '');
+            if ($id === null || !in_array($estado, COMENTARIOS_ESTADOS, true)) { echo json_encode(['error' => 'Reporte o estado no válido']); return; }
+            $antes = $mysql->prepare("SELECT Estado FROM comentarios_app WHERE idComentario = ?");
+            $antes->bind_param('i', $id);
+            $antes->execute();
+            $previo = $antes->get_result()->fetch_assoc();
+            if (!$previo) { echo json_encode(['error' => 'No se encontró el reporte']); return; }
+            if (array_key_exists('respuesta', $d)) {
+                $resp = texto_limpio($d['respuesta'], 1000) ?: null;   // vacío = borra la respuesta
+                $q = $mysql->prepare("UPDATE comentarios_app SET Estado = ?, Respuesta = ? WHERE idComentario = ?");
+                $q->bind_param('ssi', $estado, $resp, $id);
+            } else {
+                $q = $mysql->prepare("UPDATE comentarios_app SET Estado = ? WHERE idComentario = ?");
+                $q->bind_param('si', $estado, $id);
+            }
+            $q->execute();
+            error_log('[AppFinanzas][AUDITORIA] reporte ' . $id . ': estado ' . $previo['Estado'] . ' -> ' . $estado . ' (usuario ' . (int)$uid . ')');
+            echo json_encode(['estado' => $estado]);
             break;
 
         default:
