@@ -3,6 +3,7 @@
 ## 2026-10-11 · Sugerencias sin proyección lineal
 **No requiere migración.** Subir `Inteligencia/Sugerencias.php` e `Inicio/Dashboard.php`.
 - `Inteligencia/Sugerencias.php`: se elimina «A este ritmo te pasarías…» (extrapolaba el gasto por día, pero los pagos grandes caen en uno o dos días). Ahora el margen se calcula gasto por gasto: pagado + lo que falta por pagar vs presupuesto. Nuevas tarjetas: «Con lo que falta por pagar te pasas $X» (alerta, con los pagos pendientes más grandes), «Después de tus pagos te quedan $X libres» (o «Vas justo») y «N gastos pasaron de lo previsto». Reemplazan a «Planeaste gastar más de lo que tienes». «Prioriza abonar a…» sugiere cuánto del margen abonar y el ahorro de intereses estimado.
+- Corrección: «lo pagado» y «lo pendiente» salen del mismo recorrido gasto por gasto (pagado total = consumo + ahorro; pendiente = previsto − pagado de los gastos abiertos), así el texto cuadra: presupuesto − pagado − pendiente = margen.
 - `Inicio/Dashboard.php`: `gastoDiarioDisponible` ahora parte de lo que queda DESPUÉS de lo pendiente por pagar (antes solo total − pagado).
 
 ## 2026-10-11 · Historial de deudas y exportación para IA
