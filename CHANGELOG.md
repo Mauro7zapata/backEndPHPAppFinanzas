@@ -1,5 +1,10 @@
 # Changelog · Backend
 
+## 2026-10-11 · Sugerencias sin proyección lineal
+**No requiere migración.** Subir `Inteligencia/Sugerencias.php` e `Inicio/Dashboard.php`.
+- `Inteligencia/Sugerencias.php`: se elimina «A este ritmo te pasarías…» (extrapolaba el gasto por día, pero los pagos grandes caen en uno o dos días). Ahora el margen se calcula gasto por gasto: pagado + lo que falta por pagar vs presupuesto. Nuevas tarjetas: «Con lo que falta por pagar te pasas $X» (alerta, con los pagos pendientes más grandes), «Después de tus pagos te quedan $X libres» (o «Vas justo») y «N gastos pasaron de lo previsto». Reemplazan a «Planeaste gastar más de lo que tienes». «Prioriza abonar a…» sugiere cuánto del margen abonar y el ahorro de intereses estimado.
+- `Inicio/Dashboard.php`: `gastoDiarioDisponible` ahora parte de lo que queda DESPUÉS de lo pendiente por pagar (antes solo total − pagado).
+
 ## 2026-10-11 · Historial de deudas y exportación para IA
 **No requiere migración.** Subir `Deudas/Deudas.php` y el nuevo `Configuracion/Exportar.php`.
 - `Deudas/Deudas.php`: `GET ?historial=1` devuelve hasta 13 puntos con el saldo total en pesos de las deudas activas (cada deuda cuenta desde su fecha de creación; el último punto es el saldo de hoy). Alimenta el gráfico de fondo de la tarjeta «Deuda total».

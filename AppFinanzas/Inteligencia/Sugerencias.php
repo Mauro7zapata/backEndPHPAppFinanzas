@@ -75,6 +75,7 @@ $sm = $mes + 1; $sa = $anho; if ($sm > 12) { $sm = 1; $sa++; }
 $total = 0.0; $previsto = 0.0; $pagado = 0.0; $ahorrado = 0.0; $consumo = 0.0;
 $vencidos = 0; $valorVencido = 0.0; $nGastos = 0; $nPagados = 0; $proximos7 = 0.0; $nProximos7 = 0;
 $cats = []; $catsAnt = [];
+$comprometido = 0.0; $sobregiros = []; $pendientesGrandes = []; $margen = null;
 if ($p) {
     $idP = (int)$p['idPresupuesto'];
     $total = (float)$p['total'];
@@ -99,6 +100,26 @@ if ($p) {
         elseif ($d <= 7) { $proximos7 += $falta; $nProximos7++; }
     }
     $cats = consumoPorCategoria($idP);
+
+    // Compromiso real del mes, gasto por gasto: lo pagado + lo que falta de cada gasto abierto (los pagos grandes llegan
+    // en uno o dos días del mes: facturas, cuotas, arriendo; por eso NO se proyecta con un ritmo diario).
+    $s = $mysql->prepare("SELECT g.NombreGasto AS nombre, e.NombreEstado AS estado, g.CostoPrevisto AS previsto, " . sqlValorEfectivoGasto() . " AS pagado
+        FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = ?
+        WHERE g.idPresupuesto = ? AND e.NombreEstado NOT IN ('Guardado','Acumulado')");
+    $s->bind_param('ii', $uid, $idP); $s->execute();
+    foreach ($s->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
+        $pv = (float)$f['previsto']; $pg = (float)$f['pagado'];
+        if ($f['estado'] === 'Pagado') {
+            $comprometido += $pg;
+        } else {
+            $comprometido += max($pv, $pg);
+            if ($pv - $pg > 0) $pendientesGrandes[] = ['n' => $f['nombre'], 'v' => $pv - $pg];
+        }
+        if ($pv > 0 && $pg - $pv >= 20000 && $pg > $pv * 1.1) $sobregiros[] = ['n' => $f['nombre'], 'dif' => $pg - $pv];
+    }
+    $s->close();
+    usort($pendientesGrandes, function ($a, $b) { return $b['v'] <=> $a['v']; });
+    usort($sobregiros, function ($a, $b) { return $b['dif'] <=> $a['dif']; });
 }
 if ($pAnt) $catsAnt = consumoPorCategoria((int)$pAnt['idPresupuesto']);
 $mesLbl = $nombresMes[$mes];
@@ -119,27 +140,33 @@ if ($nProximos7 > 0) {
     agregar('proximos7', 'consejo', '📅', "En 7 días vencen " . cop($proximos7), "Son $nProximos7 " . ($nProximos7 === 1 ? 'pago' : 'pagos') . '. Resérvalo ya para que el dinero no se gaste en otra cosa.', 80, 'presupuesto');
 }
 
-// ------------------------------------------------------------------ 3) plan vs dinero disponible
+// ------------------------------------------------------------------ 3) margen real del mes (pagado + pendiente vs presupuesto)
 if ($p && $total > 0) {
-    $libre = $total - $previsto;
-    if ($libre < 0) {
-        agregar('sobreplan', 'alerta', '⚠️', 'Planeaste gastar más de lo que tienes',
-            'Tus gastos previstos superan el presupuesto por ' . cop(-$libre) . '. Recorta algún gasto o ajusta el presupuesto antes de que el mes avance.', 90, 'presupuesto');
-    } elseif ($libre / $total >= 0.05) {
-        agregar('sin-asignar', 'consejo', '💡', 'Tienes ' . cop($libre) . ' sin asignar',
-            'Dale un destino a ese dinero: ahorro, abono extra a una deuda o un fondo de emergencia. Lo que no se asigna, se gasta sin notarlo.', 55, 'presupuesto');
+    $margen = $total - $comprometido;
+    $pendientePago = max(0.0, $comprometido - $consumo);
+    $listar = function ($arr, $clave, $n = 2) {
+        return implode(', ', array_map(function ($x) use ($clave) { return $x['n'] . ' (' . cop($x[$clave]) . ')'; }, array_slice($arr, 0, $n)));
+    };
+    if ($margen < 0) {
+        agregar('sin-margen', 'alerta', '🧮', 'Con lo que falta por pagar te pasas ' . cop(-$margen),
+            'Ya pagaste ' . cop($consumo) . ' y faltan ' . cop($pendientePago) . ' por pagar: eso supera tu presupuesto.'
+            . ($pendientesGrandes ? ' Lo más grande que aún no pagas: ' . $listar($pendientesGrandes, 'v') . '. Revisa si algo se puede aplazar o recortar, o ajusta el presupuesto.' : ' Ajusta el presupuesto o recorta algún gasto.'),
+            93, 'presupuesto');
+    } elseif ($esMesActual && $diasRestantes > 0) {
+        $ajustado = $margen / $total < 0.03;
+        agregar('margen', ($margen / $total >= 0.1) ? 'logro' : 'consejo', $ajustado ? '🧭' : '🎯',
+            ($ajustado ? 'Vas justo: ' : 'Después de tus pagos te quedan ') . cop($margen) . ($ajustado ? ' de margen' : ' libres'),
+            'Ya pagaste ' . cop($consumo) . ' y faltan ' . cop($pendientePago) . ' por pagar. '
+            . ($ajustado ? 'Cuida los gastos del día a día hasta cerrar el mes.'
+                : 'Ese margen es tu tope para gastos del día a día' . ($diasRestantes >= 3 ? ' (unos ' . cop($margen / $diasRestantes) . ' por día si quieres repartirlo)' : '') . '. Si no lo necesitas, mejor destínalo a ahorro o a un abono extra de deuda.'),
+            $ajustado ? 74 : 52, 'presupuesto');
+    } elseif (!$esMesActual && $total - $previsto >= $total * 0.05) {
+        agregar('sin-asignar', 'consejo', '💡', 'Tienes ' . cop($total - $previsto) . ' sin asignar',
+            'Dale un destino a ese dinero: ahorro, abono extra a una deuda o un fondo de emergencia.', 55, 'presupuesto');
     }
-
-    // Ritmo de gasto (solo mes en curso, con al menos 5 días de datos).
-    if ($esMesActual && $diaActual >= 5 && $consumo > 0) {
-        $proy = $consumo / $diaActual * $diasMes;
-        if ($proy > $total * 1.05) {
-            agregar('ritmo-alto', 'alerta', '📈', 'A este ritmo te pasarías ' . cop($proy - $total),
-                'Llevas ' . cop($consumo) . " en $diaActual días. Si reduces unos " . cop(($proy - $total) / max(1, $diasRestantes)) . ' por día lo que resta del mes, cierras dentro del presupuesto.', 92, 'presupuesto');
-        } elseif ($proy <= $total * 0.85 && $consumo > 0) {
-            agregar('ritmo-bueno', 'logro', '🎯', 'Vas por debajo del ritmo',
-                'Proyectas cerrar con ' . cop($total - $proy) . ' de sobra. ¡Sigue así!', 40);
-        }
+    if ($sobregiros && $margen >= 0) {
+        agregar('sobregiros', 'consejo', '🔎', count($sobregiros) . (count($sobregiros) === 1 ? ' gasto pasó' : ' gastos pasaron') . ' de lo previsto',
+            'Los mayores: ' . $listar($sobregiros, 'dif', 3) . ' por encima del plan. Si es normal, súbeles el valor previsto (o en la plantilla) para que tu plan sea realista.', 66, 'presupuesto');
     }
 }
 
@@ -219,8 +246,14 @@ if ($conTasa) {
     usort($conTasa, function ($a, $b) { return $b['ea'] <=> $a['ea']; });
     $top = $conTasa[0];
     if (count($conTasa) >= 2) {
+        $extra = '';
+        if ($margen !== null && $margen > 50000 && $esMesActual) {
+            $abono = min($margen * 0.5, $top['saldo']);
+            $mensualTop = pow(1 + $top['ea'] / 100, 1 / 12) - 1;
+            $extra = ' Si destinas ' . cop($abono) . ' de lo que te sobra este mes, te ahorras ~' . cop($abono * $mensualTop) . ' al mes en intereses.';
+        }
         agregar('avalancha', 'consejo', '🎯', "Prioriza abonar a {$top['n']}",
-            'Es tu deuda más cara (' . number_format($top['ea'], 1, ',', '.') . ' % E.A.). Paga el mínimo en las demás y manda todo extra a esta: es lo que más intereses te ahorra.', 75, 'deudas');
+            'Es tu deuda más cara (' . number_format($top['ea'], 1, ',', '.') . ' % E.A.). Paga el mínimo en las demás y manda todo extra a esta: es lo que más intereses te ahorra.' . $extra, 75, 'deudas');
     }
     if ($interesMes >= 20000) {
         agregar('intereses', 'consejo', '💸', 'Tus deudas te cuestan ~' . cop($interesMes) . ' al mes en intereses',

@@ -109,8 +109,11 @@ if ($p) {
     $presupuesto['libre'] = $presupuesto['total'] - $presupuesto['previsto'];
     $presupuesto['porcentajeUsado'] = $presupuesto['total'] > 0 ? round($presupuesto['pagado'] / $presupuesto['total'], 4) : 0.0;
     if ($esMesActual) {
-        if ($presupuesto['diasRestantes'] >= 0 && $presupuesto['restante'] > 0) {
-            $presupuesto['gastoDiarioDisponible'] = round($presupuesto['restante'] / ($presupuesto['diasRestantes'] + 1));
+        // Margen para el día a día = lo que queda DESPUÉS de pagar lo pendiente (no solo total - pagado: las facturas y cuotas
+        // que aún no pagas ya están comprometidas). Es un tope orientativo, no un gasto diario fijo.
+        $margenLibre = $presupuesto['total'] - $presupuesto['pagado'] - $presupuesto['porPagar'];
+        if ($presupuesto['diasRestantes'] >= 0 && $margenLibre > 0) {
+            $presupuesto['gastoDiarioDisponible'] = round($margenLibre / ($presupuesto['diasRestantes'] + 1));
         }
         // Cierre estimado = lo ya pagado + lo que falta por pagar de los gastos previstos (compromisos reales).
         // No se extrapola por días: los pagos grandes (arriendo, cuotas) suelen caer al inicio del mes y inflarían la cifra.
