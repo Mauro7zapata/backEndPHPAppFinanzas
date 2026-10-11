@@ -8,6 +8,7 @@ header('Content-Type: application/json; charset=utf-8');
 //
 //   GET  Deudas.php            -> lista de deudas con saldo calculado
 //   GET  Deudas.php?id=N       -> una deuda con sus últimos movimientos
+//   GET  Deudas.php?historial=1 -> evolución del saldo total en pesos (gráfico)
 //   POST Deudas.php (JSON)     -> accion: crear | actualizar | eliminar | movimiento | actualizarMovimiento | eliminarMovimiento
 //
 // Saldo actual = saldoInicial + cargos + intereses - abonos.
@@ -382,9 +383,60 @@ function procesarDeuda($d) {
     }
 }
 
+// Evolución del saldo total en pesos de las deudas activas (para el gráfico de la pantalla de deudas).
+// GET Deudas.php?historial=1 -> {"puntos":[{"fecha":"AAAA-MM-DD","saldo":N}, ...]} (hasta ~13 puntos, el último es el saldo de hoy).
+// Cada deuda cuenta desde su fecha de creación con su saldo inicial; los movimientos cuentan desde su fecha.
+function historialDeudas() {
+    global $mysql, $uid;
+    $q = $mysql->prepare("SELECT idDeuda, SaldoInicial, DATE(FechaCreacion) AS creada FROM deudas WHERE IdUsuario = ? AND Activa = 1");
+    $q->bind_param('i', $uid);
+    $q->execute();
+    $deudas = $q->get_result()->fetch_all(MYSQLI_ASSOC);
+    if (!$deudas) { echo json_encode(['puntos' => []]); return; }
+
+    $q = $mysql->prepare("SELECT md.idDeuda, md.Tipo, md.Valor, md.Fecha FROM movimientos_deuda md
+        INNER JOIN deudas d ON d.idDeuda = md.idDeuda WHERE d.IdUsuario = ? AND d.Activa = 1" . sqlSoloPesosDeuda());
+    $q->bind_param('i', $uid);
+    $q->execute();
+    $movs = $q->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    $hoy = new DateTime('today');
+    $minimo = (clone $hoy)->modify('-90 days');
+    $inicio = null;
+    foreach ($deudas as $d) {
+        $c = new DateTime($d['creada']);
+        if ($inicio === null || $c < $inicio) $inicio = $c;
+    }
+    if ($inicio < $minimo) $inicio = $minimo;
+    $dias = (int)$inicio->diff($hoy)->days;
+    $paso = max(1, (int)floor($dias / 12));
+
+    $fechas = [];
+    for ($f = clone $inicio; $f < $hoy; $f->modify("+$paso days")) $fechas[] = $f->format('Y-m-d');
+    $fechas[] = $hoy->format('Y-m-d');
+
+    $puntos = [];
+    foreach ($fechas as $fecha) {
+        $saldo = 0.0;
+        foreach ($deudas as $d) {
+            if ($d['creada'] <= $fecha) $saldo += (float)$d['SaldoInicial'];
+        }
+        foreach ($movs as $m) {
+            if ($m['Fecha'] <= $fecha) $saldo += $m['Tipo'] === 'Abono' ? -(float)$m['Valor'] : (float)$m['Valor'];
+        }
+        $puntos[] = ['fecha' => $fecha, 'saldo' => round($saldo, 2)];
+    }
+    echo json_encode(['puntos' => $puntos]);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
     procesarDeuda(is_array($input) ? $input : $_POST);
+} elseif (isset($_GET['historial'])) {
+    try { historialDeudas(); } catch (mysqli_sql_exception $e) {
+        error_log('[AppFinanzas] Deudas historial: ' . $e->getMessage());
+        echo json_encode(['error' => 'No se pudo calcular el historial']);
+    }
 } elseif (isset($_GET['id'])) {
     $id = appfinanzas_entero($_GET['id']);
     if ($id === null) echo json_encode(['error' => 'Identificador no válido']); else detalleDeuda($id);
