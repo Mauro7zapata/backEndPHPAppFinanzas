@@ -1,5 +1,19 @@
 # Changelog · Backend
 
+## 2026-10-11 · Tablero de la comunidad en Sugerencias y errores
+**Requiere ejecutar `sql/022_comentarios_comunidad.sql` (con copia de seguridad).**
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Visibilidad y apoyos | sql/022_comentarios_comunidad.sql | Columna `comentarios_app.Publico` (los existentes quedan privados) y tabla `comentarios_apoyos` («Tambien» y «Reabrir», con nota) | Que todos vean y se sumen sin exponer datos | Idempotente |
+| Tablero y acciones | Configuracion/Comentarios.php | `GET ?tablero=1` (públicos + míos, sin datos del autor); POST `apoyar`, `quitarApoyo`, `reabrir` (Resuelto/Descartado → Nuevo), `visibilidad`; `crear` acepta `publico`; no se elimina un reporte con apoyos de otros | Comunidad, reabrir y privacidad | Sin la 022 todo sigue como antes salvo el tablero |
+
+
+## 2026-10-11 · Un solo aviso de presupuesto superado
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Mensajes del Inicio | Inicio/Dashboard.php | «Superaste el presupuesto» incluye lo previsto («Contando lo previsto, te pasarías por $X») y ya no se envía aparte «Tus gastos previstos superan…» cuando ya se superó | Dos tarjetas casi iguales | Una tarjeta menos |
+
+
 ## 2026-10-11 · Imágenes en «Sugerencias y errores»
 **Requiere ejecutar `sql/021_comentarios_imagenes.sql` (con copia de seguridad).**
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |

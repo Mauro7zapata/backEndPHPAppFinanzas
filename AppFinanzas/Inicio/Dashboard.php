@@ -359,7 +359,7 @@ if ($racha >= 2) {
 if ($presupuesto['existe'] && $presupuesto['total'] > 0) {
     $uso = $presupuesto['porcentajeUsado'];
     if ($presupuesto['pagado'] > $presupuesto['total']) {
-        $mensajes[] = ['emoji' => '🚨', 'titulo' => 'Superaste el presupuesto por ' . pesos($presupuesto['pagado'] - $presupuesto['total']), 'detalle' => 'Revisa en qué categorías se fue más y ajusta lo que queda del mes.', 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver presupuesto'];
+        $mensajes[] = ['emoji' => '🚨', 'titulo' => 'Superaste el presupuesto por ' . pesos($presupuesto['pagado'] - $presupuesto['total']), 'detalle' => 'Revisa en qué categorías se fue más y ajusta lo que queda del mes.' . ($presupuesto['libre'] < 0 ? ' Contando lo previsto, te pasarías por ' . pesos(-$presupuesto['libre']) . '.' : ''), 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver presupuesto'];
     } elseif (($umbral = parametroApp('porcentaje_alerta_presupuesto')) > 0 && $uso * 100 >= $umbral) {
         $mensajes[] = ['emoji' => '⚠️', 'titulo' => 'Ya usaste el ' . round($uso * 100) . '% del presupuesto', 'detalle' => 'Tu aviso está en ' . $umbral . '%. Te quedan ' . pesos(max(0, $presupuesto['total'] - $presupuesto['pagado'])) . ' para el resto del mes.', 'tono' => 'alerta', 'accion' => 'ver_presupuesto', 'boton' => 'Ver presupuesto'];
     } elseif ($esMesActual && $diaActual >= 5 && $uso > $presupuesto['porcentajeMes'] + 0.15) {
@@ -375,7 +375,8 @@ if ($presupuesto['existe'] && $presupuesto['total'] > 0) {
     } elseif ($esMesActual && $diaActual >= 5 && $presupuesto['pagado'] > 0 && $uso <= $presupuesto['porcentajeMes']) {
         $mensajes[] = ['emoji' => '👏', 'titulo' => 'Vas por buen camino', 'detalle' => 'Llevas el ' . round($uso * 100) . '% del presupuesto y el mes va en el ' . round($presupuesto['porcentajeMes'] * 100) . '%.', 'tono' => 'ok', 'accion' => 'ver_presupuesto', 'boton' => 'Ver presupuesto'];
     }
-    if ($presupuesto['libre'] < 0) {
+    // Si ya se superó lo pagado, esa cifra va dentro del aviso «Superaste…» (un solo mensaje, no dos casi iguales).
+    if ($presupuesto['libre'] < 0 && $presupuesto['pagado'] <= $presupuesto['total']) {
         $mensajes[] = ['emoji' => '⚖️', 'titulo' => 'Tus gastos previstos superan el presupuesto en ' . pesos(-$presupuesto['libre']), 'detalle' => 'Ajusta el presupuesto o recorta gastos previstos.', 'tono' => 'info', 'accion' => 'ver_presupuesto', 'boton' => 'Ajustar'];
     }
 }
