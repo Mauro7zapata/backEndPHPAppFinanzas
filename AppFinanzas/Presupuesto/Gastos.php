@@ -5,54 +5,6 @@ require_once(__DIR__ . '/../lib.php');
 // Pendiente -> En proceso -> Guardado -> Acumulado -> Pagado -> No aplica
 define('ORDEN_ESTADO_SQL', "CASE e.NombreEstado WHEN 'Pendiente' THEN 1 WHEN 'En proceso' THEN 2 WHEN 'Guardado' THEN 3 WHEN 'Acumulado' THEN 4 WHEN 'Pagado' THEN 5 WHEN 'No aplica' THEN 6 ELSE 7 END");
 
-
-// Consultar Gastos
-function consultarGastos() {
-    global $mysql, $uid;
-    $query = "SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.CostoReal, g.FechaLimite, g.Observaciones, g.IdEstado, g.IdCategoria, g.FechaPago, g.idPresupuesto, g.valorGastosMovimiento, g.idDeuda, g.idObligacion, (SELECT dd.Nombre FROM deudas dd WHERE dd.idDeuda = g.idDeuda AND dd.IdUsuario = p.IdUsuario) AS NombreDeuda, (SELECT oo.Nombre FROM obligaciones oo WHERE oo.idObligacion = g.idObligacion AND oo.IdUsuario = p.IdUsuario) AS NombreObligacion" . sqlLugarGasto() . "
-            FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
-            INNER JOIN categoriagastos c ON g.IdCategoria = c.idCategoriaGastos AND c.IdUsuario = p.IdUsuario
-            WHERE p.IdUsuario = ?
-            ORDER BY c.NombreCategoria, g.NombreGasto";
-    $stmt = $mysql->prepare($query);
-    $stmt->bind_param("i", $uid);
-    $stmt->execute();
-    $result = $stmt->get_result();
-
-    $response = [];
-
-    if ($result->num_rows > 0) {
-        while ($row = appfinanzas_fila_texto($result->fetch_assoc())) {
-            $response[] = [
-                "idGastos" => $row['idGastos'],
-                "NombreGasto" => $row['NombreGasto'],
-                "CostoPrevisto" => $row['CostoPrevisto'],
-                "CostoReal" => $row['CostoReal'],
-                "FechaLimite" => $row['FechaLimite'],
-                "Observaciones" => $row['Observaciones'],
-                "IdEstado" => $row['IdEstado'],
-                "IdCategoria" => $row['IdCategoria'],
-                "FechaPago" => $row['FechaPago'],
-                "idPresupuesto" => $row['idPresupuesto'],
-                "valorGastosMovimiento" => $row['valorGastosMovimiento'],
-                "idDeuda" => $row['idDeuda'],
-                "idObligacion" => $row['idObligacion'],
-                "NombreDeuda" => $row['NombreDeuda'],
-                "NombreObligacion" => $row['NombreObligacion'],
-                "idLugar" => $row['idLugar'],
-                "NombreLugar" => $row['NombreLugar']
-            ];
-        }
-        // Retornar los resultados como JSON
-        header('Content-Type: application/json');
-        echo json_encode($response);
-    } else {
-        // Retornar un JSON vacío si no hay registros
-        header('Content-Type: application/json');
-        echo json_encode([]);
-    }
-}
-
 function consultarGastosPorMesYAnho($mes, $anho) {
     global $mysql, $uid;
 
@@ -268,7 +220,6 @@ function consultarTotalesGastos($mes, $anho) {
     echo json_encode($response);
 }
 
-
 // Valida los campos comunes de un gasto. Devuelve un mensaje de error o null si es válido.
 function validarGasto($data) {
     if (trim($data['NombreGasto'] ?? '') === '') {
@@ -430,7 +381,6 @@ function insertarGastos($data) {
         echo mensajeErrorGasto("insertar", $e);
     }
 }
-
 
 // Editar Gasto
 function editarGastos($data) {

@@ -1,5 +1,13 @@
 # Changelog · Backend
 
+## 2026-10-11 — Depuración de endpoints y funciones sin uso
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Endpoint antiguo de cuotas | AppFinanzas/Inversiones/PlanPagos.php | Eliminado (lo reemplazó `Cuotas.php`) | La app ya no lo llama | **Borrarlo también del servidor** |
+| Perfil | AppFinanzas/Auth/Perfil.php | Eliminado | La app no lo usa | Borrarlo del servidor |
+| Diagnóstico | AppFinanzas/diag.php, AppFinanzas/probar_login.html | Eliminados del repositorio | Herramientas temporales de pruebas; exponían información del servidor | **Borrarlos del servidor** |
+| Funciones sin uso | Presupuesto/Gastos.php (`consultarGastos`), Inversiones/Aportes.php (`aporteJson`) | Eliminadas | Código muerto | Sin cambio de comportamiento |
+
 
 ## 2026-10-11 — Código de administrador para exportar y gestionar reportes
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |

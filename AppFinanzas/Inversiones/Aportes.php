@@ -41,10 +41,6 @@ function ajustarCapital($idInversion, $delta) {
     return null;
 }
 
-function aporteJson($f) {
-    return ['idAporte' => (int)$f['idAporte'], 'fecha' => $f['Fecha'], 'valor' => (float)$f['Valor'], 'observaciones' => $f['Observaciones']];
-}
-
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $id = appfinanzas_entero($_GET['idInversion'] ?? null);
     if ($id === null || !invCargar($id)) { echo json_encode(['error' => 'La inversión no existe']); exit; }
