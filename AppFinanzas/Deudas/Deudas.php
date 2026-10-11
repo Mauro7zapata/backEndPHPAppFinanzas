@@ -385,7 +385,9 @@ function procesarDeuda($d) {
 
 // Evolución del saldo total en pesos de las deudas activas (para el gráfico de la pantalla de deudas).
 // GET Deudas.php?historial=1 -> {"puntos":[{"fecha":"AAAA-MM-DD","saldo":N}, ...]} (hasta ~13 puntos, el último es el saldo de hoy).
-// Cada deuda cuenta desde su fecha de creación con su saldo inicial; los movimientos cuentan desde su fecha.
+// El saldo inicial de cada deuda cuenta en todo el periodo (es la deuda con la que empezaste a registrar), así la línea solo
+// refleja cargos, intereses y abonos y no un salto artificial el día que registraste cada deuda. El periodo empieza
+// el día en que se creó la primera deuda (máximo 90 días atrás).
 function historialDeudas() {
     global $mysql, $uid;
     $q = $mysql->prepare("SELECT idDeuda, SaldoInicial, DATE(FechaCreacion) AS creada FROM deudas WHERE IdUsuario = ? AND Activa = 1");
@@ -419,7 +421,7 @@ function historialDeudas() {
     foreach ($fechas as $fecha) {
         $saldo = 0.0;
         foreach ($deudas as $d) {
-            if ($d['creada'] <= $fecha) $saldo += (float)$d['SaldoInicial'];
+            $saldo += (float)$d['SaldoInicial'];
         }
         foreach ($movs as $m) {
             if ($m['Fecha'] <= $fecha) $saldo += $m['Tipo'] === 'Abono' ? -(float)$m['Valor'] : (float)$m['Valor'];

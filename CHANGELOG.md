@@ -7,7 +7,7 @@
 
 ## 2026-10-11 · Historial de deudas y exportación para IA
 **No requiere migración.** Subir `Deudas/Deudas.php` y el nuevo `Configuracion/Exportar.php`.
-- `Deudas/Deudas.php`: `GET ?historial=1` devuelve hasta 13 puntos con el saldo total en pesos de las deudas activas (cada deuda cuenta desde su fecha de creación; el último punto es el saldo de hoy). Alimenta el gráfico de fondo de la tarjeta «Deuda total».
+- `Deudas/Deudas.php`: `GET ?historial=1` devuelve hasta 13 puntos con el saldo total en pesos de las deudas activas (el saldo inicial cuenta en todo el periodo, para que la línea muestre solo cargos, intereses y abonos; el último punto es el saldo de hoy). Alimenta el gráfico de fondo de la tarjeta «Deuda total».
 - `Configuracion/Exportar.php` (nuevo): `GET` devuelve `{archivo, texto}` con un informe en texto plano (presupuesto de los últimos 6 meses por categoría y detalle de los 2 más recientes, deudas con saldo/cupo/tasa/cuota y movimientos de 90 días, obligaciones anuales, inversiones, próximas cuotas y fondo). Sin correo, nombre ni credenciales; cada sección falla por separado.
 
 ## 2026-10-09 · Sugerencias y errores de los usuarios
