@@ -1,5 +1,13 @@
 # Changelog · Backend
 
+## 2026-10-11 · Historial de capital en la calle
+**No requiere migración.** Subir `libInversiones.php` e `Inversiones/Resumen.php` (y `Deudas/Deudas.php` si no lo subiste).
+- `libInversiones.php`: `invCalcularResumen()` devuelve `historial` [{fecha, saldo}] con el capital en la calle (capital puesto − capital recuperado hasta cada fecha, solo inversiones desembolsadas, hasta 13 puntos en 180 días; el último punto es el capital de hoy). Lo usa el gráfico del encabezado de Inversiones (por moneda).
+
+## 2026-10-11 · «Lo que viene» solo muestra lo cercano
+**No requiere migración.** Subir `Inicio/Dashboard.php`.
+- La agenda del Inicio usa la anticipación configurada `dias_aviso_pagos` (por defecto 3 días) para gastos, cobros de inversiones, pagos de deudas y obligaciones (antes 30/30/45 días); lo vencido sigue apareciendo. Hasta 15 por bloque (antes 6) para que la app los pueda expandir. «Próximo pago» de la tarjeta de deudas sigue viendo hasta 30 días.
+
 ## 2026-10-11 · Sugerencias sin proyección lineal
 **No requiere migración.** Subir `Inteligencia/Sugerencias.php` e `Inicio/Dashboard.php`.
 - `Inteligencia/Sugerencias.php`: se elimina «A este ritmo te pasarías…» (extrapolaba el gasto por día, pero los pagos grandes caen en uno o dos días). Ahora el margen se calcula gasto por gasto: pagado + lo que falta por pagar vs presupuesto. Nuevas tarjetas: «Con lo que falta por pagar te pasas $X» (alerta, con los pagos pendientes más grandes), «Después de tus pagos te quedan $X libres» (o «Vas justo») y «N gastos pasaron de lo previsto». Reemplazan a «Planeaste gastar más de lo que tienes». «Prioriza abonar a…» sugiere cuánto del margen abonar y el ahorro de intereses estimado.

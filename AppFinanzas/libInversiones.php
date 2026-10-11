@@ -610,6 +610,33 @@ function invCuotaJson($c, $hoy) {
 
 // Resumen general del módulo: KPIs, cobros por mes, capital por tipo/estado y cada inversión con su avance.
 // Lo usan Inversiones/Resumen.php y el dashboard de inicio.
+// Evolución del capital en la calle (inversiones desembolsadas): capital puesto menos capital recuperado hasta cada fecha.
+// Hasta 13 puntos en los últimos 180 días (desde la primera inversión activa); el último es el capital de hoy.
+function invHistorialCapital($serie, $hoy) {
+    if (!$serie) return [];
+    $inicio = null;
+    foreach ($serie as $x) if ($inicio === null || $x['ini'] < $inicio) $inicio = $x['ini'];
+    $minimo = date('Y-m-d', strtotime('-180 days', strtotime($hoy)));
+    if ($inicio < $minimo) $inicio = $minimo;
+    $dias = (int)(new DateTime($inicio))->diff(new DateTime($hoy))->days;
+    $paso = max(1, (int)floor($dias / 12));
+    $fechas = [];
+    for ($f = new DateTime($inicio); $f->format('Y-m-d') < $hoy; $f->modify("+$paso days")) $fechas[] = $f->format('Y-m-d');
+    $fechas[] = $hoy;
+    $puntos = [];
+    foreach ($fechas as $fecha) {
+        $saldo = 0.0;
+        foreach ($serie as $x) {
+            if ($x['ini'] > $fecha) continue; // aún no se había puesto este capital
+            $recuperado = 0.0;
+            foreach ($x['cobros'] as $c) if ($c[0] <= $fecha) $recuperado += $c[1];
+            $saldo += max(0.0, $x['capital'] - $recuperado);
+        }
+        $puntos[] = ['fecha' => $fecha, 'saldo' => round($saldo, 2)];
+    }
+    return $puntos;
+}
+
 function invCalcularResumen($hoy, $moneda = 'COP') {
     global $mysql, $uid;
     $mesActual = substr($hoy, 0, 7);
@@ -658,6 +685,7 @@ function invCalcularResumen($hoy, $moneda = 'COP') {
     $porEstado = [];
     $lista = [];
     $desembolsado = 0.0; $retornos = 0.0; $perdido = 0.0; // para el fondo de inversión
+    $serieCapital = [];
     $limite30 = date('Y-m-d', strtotime('+30 days', strtotime($hoy)));
 
     foreach ($inversiones as $inv) {
@@ -680,6 +708,11 @@ function invCalcularResumen($hoy, $moneda = 'COP') {
             $kpi['activas']++;
             $kpi['capitalActivo'] += $r['saldo'];
             $kpi['capitalPrestado'] += $r['capital'];
+            $cobros = [];
+            foreach ($cuotas as $c) {
+                if ($c['cobrada'] && (float)$c['CapitalPagado'] > 0) $cobros[] = [$c['FechaRealPago'] ?: $c['FechaPrevistaPago'] ?: $hoy, (float)$c['CapitalPagado']];
+            }
+            $serieCapital[] = ['ini' => invFecha($inv['FechaInicio']) ?: $hoy, 'capital' => $r['capital'], 'cobros' => $cobros];
             $kpi['rendimientoMensual'] += $r['rendimientoMensual'];
             if ($r['valorActual'] !== null) { $kpi['valorAcciones'] += $r['valorActual']; $kpi['gananciaAcciones'] += $r['ganancia']; $kpi['capitalValorado'] += $r['capital']; }
             if ($r['necesitaCuota']) $kpi['necesitanCuota']++;
@@ -725,6 +758,7 @@ function invCalcularResumen($hoy, $moneda = 'COP') {
         'kpi' => $kpi,
         'fondo' => invCalcularFondo($desembolsado, $retornos, $kpi['capitalActivo'], $perdido, $moneda),
         'meses' => array_values($meses),
+        'historial' => invHistorialCapital($serieCapital, $hoy),
         'porTipo' => array_values($porTipo),
         'porEstado' => array_values($porEstado),
         'inversiones' => $lista,

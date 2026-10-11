@@ -166,6 +166,9 @@ $tendencia = array_map(function ($t) { return ['mes' => $t['mes'], 'gastado' => 
 
 // ------------------------------------------------------------------ deudas
 $deudas = ['total' => 0.0, 'tarjetas' => 0.0, 'prestamos' => 0.0, 'informales' => 0.0, 'cantidad' => 0, 'proximoPago' => null, 'cupoUsado' => null];
+// «Lo que viene» solo muestra lo que vence dentro de la anticipación configurada (por defecto 3 días) y lo ya vencido;
+// lo lejano no se muestra para no saturar. Se cambia en Configuración → Avisos y fechas (dias_aviso_pagos).
+$ventanaAgenda = parametroApp('dias_aviso_pagos');
 $agenda = [];
 $stmt = $mysql->prepare("SELECT d.*, " . sqlSaldoDeuda() . " AS saldo FROM deudas d WHERE d.IdUsuario = ? AND d.Activa = 1");
 $stmt->bind_param('i', $uid);
@@ -184,9 +187,11 @@ foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $d) {
     if ($saldo > 0 && $d['DiaPago']) {
         $f = proximaFechaDia($d['DiaPago']);
         if ($f && dias_hasta($f) <= 30) {
-            $valor = $d['CuotaMensual'] !== null ? (float)$d['CuotaMensual'] : null;
-            $agenda[] = ['tipo' => 'deuda', 'id' => (int)$d['idDeuda'], 'titulo' => 'Pago de ' . $d['Nombre'], 'fecha' => $f,
-                'dias' => dias_hasta($f), 'valor' => $valor, 'entra' => false];
+            if (dias_hasta($f) <= $ventanaAgenda) {
+                $valor = $d['CuotaMensual'] !== null ? (float)$d['CuotaMensual'] : null;
+                $agenda[] = ['tipo' => 'deuda', 'id' => (int)$d['idDeuda'], 'titulo' => 'Pago de ' . $d['Nombre'], 'fecha' => $f,
+                    'dias' => dias_hasta($f), 'valor' => $valor, 'entra' => false];
+            }
             if ($deudas['proximoPago'] === null || $f < $deudas['proximoPago']['fecha']) {
                 $deudas['proximoPago'] = ['nombre' => $d['Nombre'], 'fecha' => $f, 'dias' => dias_hasta($f)];
             }
@@ -208,7 +213,7 @@ foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $o) {
         $obligaciones['proxima'] = ['nombre' => $o['Nombre'], 'fecha' => $o['FechaVencimiento'], 'dias' => $d, 'valor' => (float)$o['ValorEstimado']];
     }
     if ($d < 0) $obligaciones['vencidas']++;
-    if ($d <= 45) {
+    if ($d <= $ventanaAgenda) {
         $agenda[] = ['tipo' => 'obligacion', 'id' => (int)$o['idObligacion'], 'titulo' => $o['Nombre'], 'fecha' => $o['FechaVencimiento'],
             'dias' => $d, 'valor' => (float)$o['ValorEstimado'], 'entra' => false];
     }
@@ -237,7 +242,7 @@ $stmt = $mysql->prepare("SELECT p.idPlan, p.idInversion, p.NroCuota, p.FechaPrev
     WHERE (ep.NombreEstado IS NULL OR ep.NombreEstado <> 'Cobrado') AND p.FechaPrevistaPago IS NOT NULL
       AND p.FechaPrevistaPago <= ? AND p.FechaPrevistaPago >= ?
     ORDER BY p.FechaPrevistaPago LIMIT 12");
-$hasta30 = date('Y-m-d', strtotime('+30 days'));
+$hasta30 = date('Y-m-d', strtotime('+' . $ventanaAgenda . ' days'));
 $desde60 = date('Y-m-d', strtotime('-60 days'));
 $stmt->bind_param('iss', $uid, $hasta30, $desde60);
 $stmt->execute();
@@ -252,8 +257,10 @@ $stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.va
     FROM gastos g INNER JOIN presupuestos pr ON pr.idPresupuesto = g.idPresupuesto AND pr.IdUsuario = ?
     INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = pr.IdUsuario
     WHERE e.NombreEstado IN ('Pendiente','En proceso') AND g.FechaLimite IS NOT NULL AND pr.Mes = ? AND pr.Anho = ?
+      AND g.FechaLimite <= ?
     ORDER BY g.FechaLimite LIMIT 30");
-$stmt->bind_param('iii', $uid, $mes, $anho);
+$hastaGastos = date('Y-m-d', strtotime('+' . $ventanaAgenda . ' days'));
+$stmt->bind_param('iiis', $uid, $mes, $anho, $hastaGastos);
 $stmt->execute();
 foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $g) {
     $agenda[] = ['tipo' => 'gasto', 'id' => (int)$g['idGastos'], 'mes' => (int)$g['mesP'], 'anho' => (int)$g['anhoP'], 'titulo' => $g['NombreGasto'], 'fecha' => $g['FechaLimite'],
@@ -261,11 +268,11 @@ foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $g) {
 }
 usort($agenda, function ($a, $b) { return strcmp($a['fecha'], $b['fecha']) ?: strcmp($a['titulo'], $b['titulo']); });
 $agendaTotal = count($agenda);
-// Hasta 6 por clasificación (presupuesto, cobros, deudas, obligaciones) para que ninguna tape a las demás.
+// Hasta 15 por clasificación (presupuesto, cobros, deudas, obligaciones); la app muestra 3 por bloque y deja expandir el resto.
 $porTipo = [];
 $agenda = array_values(array_filter($agenda, function ($i) use (&$porTipo) {
     $porTipo[$i['tipo']] = ($porTipo[$i['tipo']] ?? 0) + 1;
-    return $porTipo[$i['tipo']] <= 6;
+    return $porTipo[$i['tipo']] <= 15;
 }));
 
 // ------------------------------------------------------------------ hábito de registro

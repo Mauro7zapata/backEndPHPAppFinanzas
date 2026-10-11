@@ -8,6 +8,7 @@ header('Content-Type: application/json; charset=utf-8');
 //   GET Resumen.php -> {
 //        kpi: capital activo, por cobrar, vencido, intereses cobrados (mes / año / total), rendimiento mensual esperado...
 //        meses: intereses y capital cobrados en los últimos 12 meses,
+//        historial: [{fecha, saldo}] del capital en la calle (hasta 13 puntos, 180 días) para el gráfico del encabezado,
 //        porTipo / porEstado: distribución del capital,
 //        inversiones: cada inversión con su avance y su próxima cuota }
 
