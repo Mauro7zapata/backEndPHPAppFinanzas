@@ -1,5 +1,26 @@
 # Changelog · Backend
 
+## 2026-10-11 · Imágenes en «Sugerencias y errores»
+**Requiere ejecutar `sql/021_comentarios_imagenes.sql` (con copia de seguridad).**
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Adjuntar imágenes | sql/021_comentarios_imagenes.sql, Configuracion/Comentarios.php | Tabla `comentarios_app_imagenes` (BLOB, en cascada con el reporte). `crear` acepta hasta 3 imágenes en base64 (JPG/PNG/WebP, ≤ 1,5 MB c/u, validadas con `getimagesizefromstring`); `GET ?imagen=ID` la entrega solo a su dueño; la lista trae los ids | Poder mandar fotos del error | Sin la migración, enviar con imagen responde «Falta ejecutar la migración 021»; sin imágenes todo igual |
+
+
+## 2026-10-11 · Ingresos extra con concepto
+**Requiere ejecutar `sql/020_ingresos_extra.sql` (con copia de seguridad).**
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Detalle de ingresos extra | sql/020_ingresos_extra.sql | Tabla `presupuesto_ingresos_extra` (concepto, valor, fecha). Los extras que ya existían quedan como «Ingreso extra (sin detalle)» | Saber de dónde salió cada extra | Idempotente; no cambia `ExtrasMes` |
+| Endpoint | Presupuesto/IngresosExtra.php (nuevo) | GET lista; POST crear/eliminar. Tras cada cambio deja `presupuestos.ExtrasMes` = suma del detalle | Dashboard, sugerencias y exportación siguen leyendo `ExtrasMes` sin cambios | Sin la migración responde «Falta ejecutar la migración 020» |
+| Eliminar presupuesto | Presupuesto/Presupuestos.php | Borra también su detalle de extras (ignora si la tabla no existe) | No dejar filas huérfanas | Ninguno |
+
+
+## 2026-10-11 · Tarjeta con abono ya cubre el pago aunque falten días
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Pastilla «Pago … ✓ pagado» | Deudas/Deudas.php (`fechasCicloActual`) | `pagoCubierto` se calcula también cuando la fecha de pago aún no llega (antes solo si ya había pasado) | Una tarjeta con abonos desde el corte seguía en amarillo «en 4 días» | Solo etiqueta; sin cambios en saldos |
+
 ## 2026-10-11 · Historial de capital en la calle
 **No requiere migración.** Subir `libInversiones.php` e `Inversiones/Resumen.php` (y `Deudas/Deudas.php` si no lo subiste).
 - `libInversiones.php`: `invCalcularResumen()` devuelve `historial` [{fecha, saldo}] con el capital en la calle (capital puesto − capital recuperado hasta cada fecha, solo inversiones desembolsadas, hasta 13 puntos en 180 días; el último punto es el capital de hoy). Lo usa el gráfico del encabezado de Inversiones (por moneda).

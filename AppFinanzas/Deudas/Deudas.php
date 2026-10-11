@@ -77,14 +77,13 @@ function fechasCicloActual($f) {
     if ($pago === null) return ['corte' => proximaFechaDia($f['DiaCorte']), 'pago' => proximaFechaDia($f['DiaPago']), 'cubierto' => false];
     $corte = $f['DiaCorte'] ? corteAnteriorA($f['DiaCorte'], $pago) : null;
     $cubierto = false;
-    if ($pago < $hoyTxt) {
-        $desde = $corte ?? $ini;
-        $q = $mysql->prepare("SELECT COALESCE(SUM(Valor),0) AS t FROM movimientos_deuda WHERE idDeuda = ? AND Tipo = 'Abono' AND Fecha >= ?");
-        $q->bind_param('is', $f['idDeuda'], $desde);
-        $q->execute();
-        $cubierto = (float)$q->get_result()->fetch_assoc()['t'] > 0;
-        $q->close();
-    }
+    // Se mira siempre (también con el pago aún por venir): un abono hecho desde el corte ya cubre este pago.
+    $desde = $corte ?? $ini;
+    $q = $mysql->prepare("SELECT COALESCE(SUM(Valor),0) AS t FROM movimientos_deuda WHERE idDeuda = ? AND Tipo = 'Abono' AND Fecha >= ?");
+    $q->bind_param('is', $f['idDeuda'], $desde);
+    $q->execute();
+    $cubierto = (float)$q->get_result()->fetch_assoc()['t'] > 0;
+    $q->close();
     return ['corte' => $corte, 'pago' => $pago, 'cubierto' => $cubierto];
 }
 

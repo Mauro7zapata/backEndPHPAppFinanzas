@@ -118,6 +118,13 @@ function eliminarPresupuesto($idPresupuesto) {
         return;
     }
 
+    // Detalle de ingresos extra (migración 020): se borra junto con el presupuesto; si la tabla aún no existe se ignora.
+    try {
+        $x = $mysql->prepare("DELETE FROM presupuesto_ingresos_extra WHERE idPresupuesto = ? AND IdUsuario = ?");
+        $x->bind_param("ii", $id, $uid);
+        $x->execute();
+    } catch (mysqli_sql_exception $e) { /* migración 020 pendiente */ }
+
     $stmt = $mysql->prepare("DELETE FROM presupuestos WHERE idPresupuesto = ? AND IdUsuario = ?");
     $stmt->bind_param("ii", $id, $uid);
     $stmt->execute();
