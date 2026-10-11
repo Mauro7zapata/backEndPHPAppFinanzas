@@ -1,5 +1,9 @@
 # Changelog · Backend
 
+## 2026-10-09 · Sugerencias y errores de los usuarios
+**Requiere `sql/019_comentarios_app.sql` (con respaldo).** Sin migrar, el endpoint responde «Falta ejecutar la migración 019».
+- Tabla `comentarios_app` (tipo Mejora/Error, título, descripción, estado, respuesta, versión de la app, dispositivo, ambiente; se borra con la cuenta). Nuevo endpoint `Configuracion/Comentarios.php`: GET lista los del usuario; POST `crear` (máx. 10 cada 24 h, validaciones de longitud) y `eliminar` (solo los que siguen en «Nuevo»). El estado (Nuevo, En revision, Planeado, Resuelto, Descartado) y la `Respuesta` los cambia el administrador desde phpMyAdmin y el usuario los ve en la app. Subir: `Configuracion/Comentarios.php`.
+
 ## 2026-10-07 · Ambientes DEV y PRD
 - Carpetas `/DEV/BackEnd_PresupuestosApp` y `/PRD/BackEnd_PresupuestosApp`, cada una con su `config.local.php` (BD propia). `config.example.php` suma `'ambiente'`; `db.php` envía la cabecera `X-Ambiente`. Guía completa en `AMBIENTES.md`. La ruta anterior `/github/AppFinanzas/` queda sin uso: mantenla mientras haya teléfonos con la app vieja.
 
