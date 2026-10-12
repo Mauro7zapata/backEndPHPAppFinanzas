@@ -1,6 +1,12 @@
 # Changelog · Backend
 
 
+## 2026-10-12 — `detalle` en el resumen de inversiones
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Cuotas que componen los KPI | libInversiones.php (`invCalcularResumen`) | Devuelve `detalle.interesMes` y `detalle.porCobrar` (idInversion, nombre, nroCuota, fecha, interés, capital, dividendo, vencida) con exactamente las mismas cuotas que suman `interesMes` y `porCobrar30` | La app lista las cuotas al tocar esas tarjetas | Campo nuevo; no cambia los existentes |
+
+
 ## 2026-10-11 — Corrección: el código de administrador nunca se leía
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|

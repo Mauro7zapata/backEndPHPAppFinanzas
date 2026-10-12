@@ -687,6 +687,8 @@ function invCalcularResumen($hoy, $moneda = 'COP') {
     $desembolsado = 0.0; $retornos = 0.0; $perdido = 0.0; // para el fondo de inversión
     $serieCapital = [];
     $limite30 = date('Y-m-d', strtotime('+30 days', strtotime($hoy)));
+    // Cuotas que componen «Intereses del mes» y «Por cobrar (30 días)»: la app las lista al tocar esas tarjetas.
+    $detalle = ['interesMes' => [], 'porCobrar' => []];
 
     foreach ($inversiones as $inv) {
         $cuotas = $porInversion[(int)$inv['idInversion']] ?? [];
@@ -732,12 +734,25 @@ function invCalcularResumen($hoy, $moneda = 'COP') {
                 if ($fecha) {
                     if (substr($fecha, 0, 4) === $anhoActual) $kpi['interesAnho'] += $interes;
                     $m = substr($fecha, 0, 7);
-                    if ($m === $mesActual) $kpi['interesMes'] += $interes;
+                    if ($m === $mesActual) {
+                        $kpi['interesMes'] += $interes;
+                        $detalle['interesMes'][] = [
+                            'idInversion' => (int)$inv['idInversion'], 'nombre' => $r['nombre'], 'nroCuota' => (int)$c['NroCuota'],
+                            'fecha' => $fecha, 'interes' => (float)$c['InteresPagado'], 'capital' => 0.0, 'dividendo' => (float)$c['DividendoPagado'], 'vencida' => false,
+                        ];
+                    }
                     if (isset($meses[$m])) { $meses[$m]['interes'] += $interes; $meses[$m]['capital'] += (float)$c['CapitalPagado']; }
                 }
             } elseif ($estado === 'Desembolsado' && $c['FechaPrevistaPago']) {
                 if ($c['FechaPrevistaPago'] < $hoy) { $kpi['vencido'] += $valor; $kpi['cuotasVencidas']++; $conAtraso = true; }
-                if ($c['FechaPrevistaPago'] <= $limite30) $kpi['porCobrar30'] += $valor;
+                if ($c['FechaPrevistaPago'] <= $limite30) {
+                    $kpi['porCobrar30'] += $valor;
+                    $detalle['porCobrar'][] = [
+                        'idInversion' => (int)$inv['idInversion'], 'nombre' => $r['nombre'], 'nroCuota' => (int)$c['NroCuota'],
+                        'fecha' => $c['FechaPrevistaPago'], 'interes' => (float)$c['InteresPagado'], 'capital' => (float)$c['CapitalPagado'],
+                        'dividendo' => (float)$c['DividendoPagado'], 'vencida' => $c['FechaPrevistaPago'] < $hoy,
+                    ];
+                }
             }
         }
         // Una inversión con varias cuotas atrasadas cuenta una sola vez aquí (la lista de la app muestra inversiones, no cuotas).
@@ -762,6 +777,7 @@ function invCalcularResumen($hoy, $moneda = 'COP') {
         'porTipo' => array_values($porTipo),
         'porEstado' => array_values($porEstado),
         'inversiones' => $lista,
+        'detalle' => $detalle,
     ];
 }
 
