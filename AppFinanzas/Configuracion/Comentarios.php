@@ -79,16 +79,25 @@ function adminFallosRecientes() {
     return array_values(array_filter(is_array($lista) ? $lista : [], function ($t) use ($limite) { return (int)$t >= $limite; }));
 }
 
-// true si el código es el de administrador. Devuelve false (y registra el fallo) si no; nunca revela por qué.
+// true si el código es el de administrador. Devuelve false (y registra el fallo) si no; nunca revela por qué
+// (salvo con 'depurar' => true en config.local.php, que deja el motivo en $GLOBALS['admin_motivo'] para diagnosticar).
 function codigoAdminValido($codigo) {
     global $config, $uid;
     $esperado = strtolower((string)($config['codigo_admin_sha256'] ?? ''));
-    if ($esperado === '' || strlen($esperado) !== 64) return false;           // administración desactivada
+    if ($esperado === '' || strlen($esperado) !== 64) {                        // administración desactivada
+        $GLOBALS['admin_motivo'] = 'config.local.php no tiene un hash SHA-256 válido (largo ' . strlen($esperado) . ', debe ser 64)';
+        return false;
+    }
     $fallos = adminFallosRecientes();
-    if (count($fallos) >= ADMIN_MAX_FALLOS) return false;                      // bloqueado temporalmente
+    if (count($fallos) >= ADMIN_MAX_FALLOS) {                                  // bloqueado temporalmente
+        $GLOBALS['admin_motivo'] = 'bloqueado por intentos fallidos';
+        return false;
+    }
     // Se ignoran espacios, guiones y mayúsculas/minúsculas: así no importa cómo lo escriba o lo pegue el teclado.
     $codigo = preg_replace('/[^A-Z0-9]/', '', strtoupper((string)$codigo));
-    if ($codigo !== '' && hash_equals($esperado, hash('sha256', $codigo))) return true;
+    $recibido = hash('sha256', $codigo);
+    if ($codigo !== '' && hash_equals($esperado, $recibido)) return true;
+    $GLOBALS['admin_motivo'] = 'no coincide: recibí ' . strlen($codigo) . ' caracteres, hash ' . substr($recibido, 0, 8) . '…, esperado ' . substr($esperado, 0, 8) . '…';
     $fallos[] = time();
     @file_put_contents(adminArchivoFallos(), json_encode($fallos), LOCK_EX);
     error_log('[AppFinanzas][AUDITORIA] código de administrador incorrecto (usuario ' . (int)$uid . ', fallos recientes ' . count($fallos) . ')');
@@ -98,9 +107,12 @@ function codigoAdminValido($codigo) {
 
 // Mensaje cuando el código no sirve (distingue el bloqueo para que la persona sepa que debe esperar).
 function adminMensajeRechazo() {
-    return count(adminFallosRecientes()) >= ADMIN_MAX_FALLOS
+    $mensaje = count(adminFallosRecientes()) >= ADMIN_MAX_FALLOS
         ? 'Demasiados intentos. Espera 15 minutos e inténtalo de nuevo.'
         : 'Código de administrador incorrecto';
+    // Solo en modo depuración se añade el motivo exacto (nunca en producción).
+    if (!empty($GLOBALS['appfinanzas_depurar']) && !empty($GLOBALS['admin_motivo'])) $mensaje .= ' [' . $GLOBALS['admin_motivo'] . ']';
+    return $mensaje;
 }
 
 // TODOS los reportes (de todos los usuarios) con los datos para reproducir errores y las ids de sus imágenes.
