@@ -1,6 +1,11 @@
 # Changelog · Backend
 
 
+## 2026-10-11 — Corrección: el código de administrador nunca se leía
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Código de administrador | AppFinanzas/db.php, Configuracion/Comentarios.php | El hash se expone en `$appConfig['codigo_admin_sha256']` y Comentarios.php lo lee de ahí (antes usaba `$config`, que db.php borra con `unset`) | Error mío: el hash siempre llegaba vacío y se rechazaba cualquier código | **Subir `db.php` y `Comentarios.php`**. Con `'depurar' => true` el rechazo indica el motivo exacto |
+
 ## 2026-10-11 — Código de administrador: nuevo código y campo visible
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|

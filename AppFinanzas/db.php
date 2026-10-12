@@ -62,6 +62,7 @@ $apiKeyUsuario = (int)($config['api_key_usuario'] ?? 0);   // 0 = la API key com
 $appConfig = [
     'google_client_ids'     => array_values(array_filter((array)($config['google_client_ids'] ?? []))),
     'codigo_cuenta_inicial' => (string)($config['codigo_cuenta_inicial'] ?? ''),
+    'codigo_admin_sha256'   => (string)($config['codigo_admin_sha256'] ?? ''),   // solo el hash; lo usa Configuracion/Comentarios.php
 ];
 
 // --- 2. Base de datos -------------------------------------------------------------------------

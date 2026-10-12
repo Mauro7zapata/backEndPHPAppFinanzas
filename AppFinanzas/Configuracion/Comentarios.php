@@ -82,8 +82,8 @@ function adminFallosRecientes() {
 // true si el código es el de administrador. Devuelve false (y registra el fallo) si no; nunca revela por qué
 // (salvo con 'depurar' => true en config.local.php, que deja el motivo en $GLOBALS['admin_motivo'] para diagnosticar).
 function codigoAdminValido($codigo) {
-    global $config, $uid;
-    $esperado = strtolower((string)($config['codigo_admin_sha256'] ?? ''));
+    global $appConfig, $uid;   // $config ya no existe: db.php la borra y deja en $appConfig los ajustes no sensibles
+    $esperado = strtolower((string)($appConfig['codigo_admin_sha256'] ?? ''));
     if ($esperado === '' || strlen($esperado) !== 64) {                        // administración desactivada
         $GLOBALS['admin_motivo'] = 'config.local.php no tiene un hash SHA-256 válido (largo ' . strlen($esperado) . ', debe ser 64)';
         return false;
