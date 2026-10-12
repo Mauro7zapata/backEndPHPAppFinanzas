@@ -86,7 +86,8 @@ function codigoAdminValido($codigo) {
     if ($esperado === '' || strlen($esperado) !== 64) return false;           // administración desactivada
     $fallos = adminFallosRecientes();
     if (count($fallos) >= ADMIN_MAX_FALLOS) return false;                      // bloqueado temporalmente
-    $codigo = strtoupper(trim((string)$codigo));
+    // Se ignoran espacios, guiones y mayúsculas/minúsculas: así no importa cómo lo escriba o lo pegue el teclado.
+    $codigo = preg_replace('/[^A-Z0-9]/', '', strtoupper((string)$codigo));
     if ($codigo !== '' && hash_equals($esperado, hash('sha256', $codigo))) return true;
     $fallos[] = time();
     @file_put_contents(adminArchivoFallos(), json_encode($fallos), LOCK_EX);

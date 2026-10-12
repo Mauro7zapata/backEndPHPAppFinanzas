@@ -1,5 +1,11 @@
 # Changelog · Backend
 
+
+## 2026-10-11 — Código de administrador: nuevo código y campo visible
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Código nuevo | Configuracion/Comentarios.php, config.local.php | Nuevo `codigo_admin_sha256`; la comparación ignora espacios, guiones y mayúsculas | El anterior no se podía recuperar/escribir | **Subir `config.local.php` y `Comentarios.php` al servidor** |
+
 ## 2026-10-11 — Depuración de endpoints y funciones sin uso
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|
