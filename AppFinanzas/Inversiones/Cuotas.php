@@ -15,6 +15,7 @@ header('Content-Type: application/json; charset=utf-8');
 //        actualizar {idPlan, fechaPrevista, interes, capital, dividendo, observaciones?, recalcularSiguientes?}
 //                                                                           corrige una cuota; si cambia la fecha y recalcularSiguientes=true,
 //                                                                           las cuotas pendientes siguientes se corren mes a mes desde la nueva fecha
+//                                                                           (cuota ya cobrada: fechaReal? corrige el día en que te pagaron)
 //        observar {idPlan, observaciones}                                   guarda (reemplaza) la observación de la cuota
 //        cobrar {idPlan, fecha?, interes?, capital?, dividendo?, observaciones?, reinvertir?}  la marca como cobrada (reinvertir: el dividendo suma al capital)
 //        deshacer {idPlan}                                                  vuelve a Pendiente
@@ -116,6 +117,14 @@ try {
                 $st = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
                     SET p.Observaciones = ? WHERE p.idPlan = ? AND i.IdUsuario = ?");
                 $st->bind_param('sii', $obs, $idPlan, $uid); $st->execute();
+            }
+            // Fecha real del cobro: solo aplica a cuotas ya cobradas (las pendientes no tienen FechaRealPago).
+            if (!empty($d['fechaReal'])) {
+                if (!appfinanzas_fecha_valida($d['fechaReal'])) { echo json_encode(['error' => 'La fecha real no es válida (AAAA-MM-DD)']); break; }
+                $fr = $d['fechaReal'];
+                $st = $mysql->prepare("UPDATE PlanPagos p INNER JOIN Inversiones i ON i.idInversion = p.idInversion
+                    SET p.FechaRealPago = ? WHERE p.idPlan = ? AND i.IdUsuario = ? AND p.FechaRealPago IS NOT NULL");
+                $st->bind_param('sii', $fr, $idPlan, $uid); $st->execute();
             }
             if (array_key_exists('reinvertir', $d)) invMarcarReinversion($idPlan, !empty($d['reinvertir']));
             invSincronizarReinversion($idPlan);

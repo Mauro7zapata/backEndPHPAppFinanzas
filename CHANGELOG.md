@@ -1,6 +1,12 @@
 # Changelog · Backend
 
 
+## 2026-10-12 — Fecha real editable en cuotas cobradas
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| `fechaReal` en `actualizar` | Inversiones/Cuotas.php | Acepta `fechaReal` (AAAA-MM-DD) y actualiza FechaRealPago solo si la cuota ya está cobrada | Corregir el día real del cobro | Campo opcional; compatible con la app anterior |
+
+
 ## 2026-10-12 — `detalle` en el resumen de inversiones
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|
