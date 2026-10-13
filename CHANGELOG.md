@@ -1,6 +1,12 @@
 # Changelog · Backend
 
 
+## 2026-10-12 — Origen del saldo separado por lugar
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| `LugaresGuardado.php?origen=1&idLugar=ID` | Presupuesto/LugaresGuardado.php (`origenLugar`) | Devuelve los gastos Guardado/Acumulado que aportan (con mes/año y aporte), los usos y ajustes, y el total; usa la misma fórmula `sqlSeparadoGasto` que el saldo | Mostrar de dónde sale cada peso del saldo separado | Endpoint nuevo; el resto no cambia (el GET `historial` queda disponible aunque la app ya no lo use) |
+
+
 ## 2026-10-12 — Fecha real editable en cuotas cobradas
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|

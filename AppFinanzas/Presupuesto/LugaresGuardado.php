@@ -10,6 +10,8 @@ header('Content-Type: application/json; charset=utf-8');
 //   GET  LugaresGuardado.php                -> {lugares:[{idLugar, nombre, guardado, acumulado, usado, ajuste, saldo, gastos}],
 //                                               sinLugar:{...igual}, total}   (saldo = guardado + acumulado + ajuste - usado, de todos los meses)
 //   GET  LugaresGuardado.php?historial=1&idLugar=ID -> {movimientos:[{idUso, fecha, tipo (Uso|Ajuste), valor, nota}]}  (idLugar 0 = sin lugar)
+//   GET  LugaresGuardado.php?origen=1&idLugar=ID -> {gastos:[{idGasto, nombre, estado, mes, anho, previsto, movimientos, aporte}], movimientos:[...como historial, sin límite],
+//                                                   aportado, usado, ajuste, saldo}   «de dónde sale el saldo»: cada gasto Guardado/Acumulado que aporta + usos y ajustes
 //   POST (JSON) accion: crear {nombre} | renombrar {idLugar, nombre} | eliminar {idLugar}
 //        usar     {idLugar, valor, fecha?, nota?}   sacas dinero de lo guardado (migración 014)
 //        corregir {idLugar, saldoReal, nota?}       declaras cuánto tienes de verdad ahí; la diferencia queda como ajuste
@@ -68,6 +70,35 @@ function historialLugar($idLugar) {
     return $res;
 }
 
+// «De dónde sale el saldo» de un lugar (0 = sin lugar): los gastos Guardado/Acumulado que aportan (con su mes) más los usos y ajustes.
+// Usa exactamente la misma fórmula que saldoSeparadoPorLugar (sqlSeparadoGasto), por eso aporte + ajustes - usado = saldo.
+function origenLugar($idLugar) {
+    global $mysql, $uid;
+    $colLugar = gastosTieneLugar() ? "COALESCE(g.idLugar, 0)" : "0";
+    $q = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, e.NombreEstado, p.Mes, p.Anho, g.CostoPrevisto, g.valorGastosMovimiento,
+            " . sqlSeparadoGasto() . " AS aporte
+        FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = p.IdUsuario
+        WHERE p.IdUsuario = ? AND e.NombreEstado IN ('Guardado', 'Acumulado') AND $colLugar = ?
+        ORDER BY p.Anho DESC, p.Mes DESC, g.NombreGasto");
+    $q->bind_param('ii', $uid, $idLugar);
+    $q->execute();
+    $gastos = [];
+    $aportado = 0.0;
+    foreach ($q->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
+        $aporte = (float)$f['aporte'];
+        $aportado += $aporte;
+        $gastos[] = ['idGasto' => (int)$f['idGastos'], 'nombre' => $f['NombreGasto'], 'estado' => $f['NombreEstado'],
+            'mes' => (int)$f['Mes'], 'anho' => (int)$f['Anho'], 'previsto' => (float)$f['CostoPrevisto'],
+            'movimientos' => (float)$f['valorGastosMovimiento'], 'aporte' => $aporte];
+    }
+    $movs = historialLugar($idLugar);
+    $usado = 0.0; $ajuste = 0.0;
+    foreach ($movs as $m) { if ($m['tipo'] === 'Uso') $usado += $m['valor']; else $ajuste += $m['valor']; }
+    return ['gastos' => $gastos, 'movimientos' => $movs, 'aportado' => round($aportado, 2), 'usado' => round($usado, 2),
+        'ajuste' => round($ajuste, 2), 'saldo' => round($aportado + $ajuste - $usado, 2)];
+}
+
 function lugarDelUsuarioOCero($v) {
     $id = appfinanzas_entero($v);
     if ($id === null || $id <= 0) return 0;
@@ -87,6 +118,11 @@ function registrarMovimientoSeparado($idLugar, $tipo, $valor, $fecha, $nota) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     try {
+        if (isset($_GET['origen'])) {
+            $l = lugarDelUsuarioOCero($_GET['idLugar'] ?? 0);
+            echo json_encode($l < 0 ? ['error' => 'El lugar no existe'] : origenLugar($l), JSON_UNESCAPED_UNICODE);
+            exit;
+        }
         if (isset($_GET['historial'])) {
             $l = lugarDelUsuarioOCero($_GET['idLugar'] ?? 0);
             echo json_encode($l < 0 ? ['error' => 'El lugar no existe'] : ['movimientos' => historialLugar($l)], JSON_UNESCAPED_UNICODE);
