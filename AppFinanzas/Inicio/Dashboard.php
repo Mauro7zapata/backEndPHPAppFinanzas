@@ -186,6 +186,12 @@ foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $d) {
 
     if ($saldo > 0 && $d['DiaPago']) {
         $f = proximaFechaDia($d['DiaPago']);
+        // Si ya se abonó desde el corte (el pago de este ciclo está cubierto), no se avisa de ese pago: el siguiente es el del mes que viene.
+        // Es la misma regla que usa la pantalla de Deudas («pagoCubierto»), para que ambas pantallas digan lo mismo.
+        $ciclo = fechasCicloActual($d);
+        if ($f && $ciclo['cubierto'] && $ciclo['pago'] !== null && $f <= $ciclo['pago']) {
+            $f = proximaFechaDia($d['DiaPago'], (new DateTime($ciclo['pago']))->modify('+1 day')->format('Y-m-d'));
+        }
         if ($f && dias_hasta($f) <= 30) {
             if (dias_hasta($f) <= $ventanaAgenda) {
                 $valor = $d['CuotaMensual'] !== null ? (float)$d['CuotaMensual'] : null;

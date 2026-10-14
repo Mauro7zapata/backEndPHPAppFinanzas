@@ -1,6 +1,13 @@
 # Changelog · Backend
 
 
+## 2026-10-12 — Inicio: «Próximo pago» ya no avisa de lo pagado
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Pago cubierto en el Inicio | Inicio/Dashboard.php | Si hay abonos desde el corte (`fechasCicloActual()['cubierto']`), el próximo pago y la agenda saltan al del mes siguiente en vez de avisar «en 3 días» | La tarjeta MasterCard 5119 ya estaba pagada y el Inicio seguía avisando | Inicio y Deudas usan ahora la misma regla |
+| Reutilización | lib.php, Deudas/Deudas.php | `fechaDiaEnPeriodo()` y `fechasCicloActual()` pasan de Deudas.php a lib.php | Evitar duplicar la lógica del ciclo | Sin cambios de comportamiento en Deudas |
+
+
 ## 2026-10-12 — Origen del saldo separado por lugar
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|

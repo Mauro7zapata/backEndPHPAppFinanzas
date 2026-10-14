@@ -52,41 +52,6 @@ function seleccionDeuda($where = '') {
         FROM deudas d $filtro ORDER BY d.Activa DESC, d.Tipo, d.Nombre";
 }
 
-// Ocurrencia del día $dia (1-31) dentro del período [$ini, $fin] (Y-m-d), ajustando a meses cortos. null si no cae en él.
-function fechaDiaEnPeriodo($dia, $ini, $fin) {
-    if (!$dia) return null;
-    $d = new DateTime($ini); $d->modify('first day of this month');
-    for ($i = 0; $i < 3; $i++) {
-        $ultimo = (int)$d->format('t');
-        $c = sprintf('%s-%02d', $d->format('Y-m'), min((int)$dia, $ultimo));
-        if ($c >= $ini && $c <= $fin) return $c;
-        $d->modify('+1 month');
-    }
-    return null;
-}
-
-// Fechas de pago/corte que se muestran: las del mes financiero ACTUAL (el pago entra en el presupuesto de este mes aunque ya
-// haya pasado); el corte es el del ciclo que se paga (anterior al pago). 'cubierto' = ya hay abonos desde ese corte.
-function fechasCicloActual($f) {
-    global $mysql;
-    $hoyTxt = date('Y-m-d');
-    $dia = parametroApp('dia_inicio_mes');
-    [$m, $a] = mesFinanciero($hoyTxt, $dia);
-    [$ini, $fin] = periodoFinanciero($m, $a, $dia);
-    $pago = $f['DiaPago'] ? fechaDiaEnPeriodo($f['DiaPago'], $ini, $fin) : null;
-    if ($pago === null) return ['corte' => proximaFechaDia($f['DiaCorte']), 'pago' => proximaFechaDia($f['DiaPago']), 'cubierto' => false];
-    $corte = $f['DiaCorte'] ? corteAnteriorA($f['DiaCorte'], $pago) : null;
-    $cubierto = false;
-    // Se mira siempre (también con el pago aún por venir): un abono hecho desde el corte ya cubre este pago.
-    $desde = $corte ?? $ini;
-    $q = $mysql->prepare("SELECT COALESCE(SUM(Valor),0) AS t FROM movimientos_deuda WHERE idDeuda = ? AND Tipo = 'Abono' AND Fecha >= ?");
-    $q->bind_param('is', $f['idDeuda'], $desde);
-    $q->execute();
-    $cubierto = (float)$q->get_result()->fetch_assoc()['t'] > 0;
-    $q->close();
-    return ['corte' => $corte, 'pago' => $pago, 'cubierto' => $cubierto];
-}
-
 function formatearDeuda($f) {
     $ciclo = fechasCicloActual($f);
     $saldo = round((float)$f['saldoActual'], 2);
