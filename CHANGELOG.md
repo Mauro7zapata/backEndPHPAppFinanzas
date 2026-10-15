@@ -1,5 +1,11 @@
 # Changelog · Backend
 
+## 2026-10-14 — Pruebas y documentación
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Pruebas automáticas | tests/run.php | 37 pruebas de `invSumarMeses`, `invFecha`, `proximaFechaDia`, `corteAnteriorA`, `fechaDiaEnPeriodo`, `mesFinanciero`, `periodoFinanciero` e `invResumen` (`php tests/run.php`) | Evitar regresiones en fechas, ciclos de tarjeta e inversiones | Solo desarrollo; no se sube al servidor |
+| Documentación | README.md | Estructura, endpoints, migraciones 001–022, instalación y rotación de claves actualizados; se quita `PlanPagos.php` | El README estaba desactualizado | Ninguno en ejecución |
+
 
 ## 2026-10-12 — Inicio: «Próximo pago» ya no avisa de lo pagado
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |

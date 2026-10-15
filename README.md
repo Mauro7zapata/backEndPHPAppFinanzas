@@ -1,46 +1,66 @@
 # Backend PHP · AppFinanzas
 
-API REST en PHP + MySQL para la app Android **PresupuestoPersonal** (presupuesto mensual, gastos, movimientos,
-inversiones y plan de pagos).
+API REST (PHP + MySQL, multiusuario) para la app Android **PresupuestoPersonal**: presupuesto mensual, gastos,
+movimientos, deudas y tarjetas, inversiones (cuotas, aportes, fondo), plata separada por lugar, inteligencia
+financiera, comentarios de usuarios y exportación.
 
 ## Estructura
 
 ```
 AppFinanzas/
-  db.php               Configuración + autenticación (API key) + conexión MySQL. Lo incluyen TODOS los endpoints.
-  config.example.php   Plantilla de configuración (copiar a config.local.php).
-  config.local.php     ¡NO está en git! Credenciales de BD y API key del servidor.
-  Estados.php          Catálogo de estados
-  Presupuesto/         Presupuestos, Gastos, Movimientos, CategoriaGastos
-  Inversiones/         inversion, PlanPagos, TipoInversion
-sql/                   Migraciones de base de datos (ejecutar en orden)
+  db.php                 Configuración + autenticación (API key + sesión de usuario) + conexión MySQL (mysqli en modo excepción).
+  config.example.php     Plantilla de configuración (copiar a config.local.php; este último NO va a git).
+  lib.php                Funciones comunes: periodo financiero, ciclo de tarjetas, saldo separado, parámetros.
+  libAuth.php            Sesiones/tokens, hash de claves, utilidades de autenticación.
+  libInversiones.php     Cálculo de resumen de inversiones (puro, probado con tests/).
+  Auth/                  Login, Registro, Google, Refresh, Logout, CambiarClave, EliminarCuenta
+  Presupuesto/           Presupuestos, Gastos, Movimientos, CategoriaGastos, IngresosExtra, LugaresGuardado, Plantilla
+  Deudas/                Deudas (tarjetas y préstamos), Obligaciones, Alertas
+  Inversiones/           inversion, Cuotas, Aportes, Fondo, Resumen, Valor, TipoInversion
+  Inicio/Dashboard.php   Resumen de la pantalla de inicio (saldo, próximos pagos, alertas)
+  Inteligencia/          Sugerencias basadas en los datos reales del usuario
+  Configuracion/         Parametros, Comentarios (con imágenes y comunidad), Exportar (JSON para IA)
+  Estados.php            Catálogo de estados
+sql/                     Migraciones 001–022 (ejecutar en orden; hacer copia de la BD antes)
+tests/run.php            Pruebas de la lógica pura (fechas, ciclos de tarjeta, resumen de inversiones)
+AMBIENTES.md             Cómo separar desarrollo (dev) y producción (prd)
+CHANGELOG.md             Historial de cambios
 ```
 
 ## Instalación / actualización en el servidor
 
-1. **Rota la contraseña de MySQL** en el panel de Hostinger (la anterior estuvo escrita en el código y en el historial de git).
-2. Copia `AppFinanzas/config.example.php` a `AppFinanzas/config.local.php` en el servidor y completa:
-   host, usuario, **nueva** contraseña, nombre de BD y `api_key` (64 hex; la misma que usa la app en `secrets.properties`).
-3. Haz una copia de seguridad de la BD (phpMyAdmin > Exportar) y ejecuta `sql/001_integridad_presupuesto.sql`.
-4. Sube los archivos PHP (incluido `.htaccess`). Sin `config.local.php` el servidor responde 500 "Servidor sin configurar".
-5. Instala la nueva versión de la app (con `api.key` en `secrets.properties`). Las versiones antiguas de la app
-   recibirán 401 porque no envían la clave.
+1. Haz una copia de seguridad de la BD (phpMyAdmin > Exportar).
+2. Ejecuta en orden las migraciones de `sql/` que aún no hayas aplicado (001 → 022).
+3. Copia `AppFinanzas/config.example.php` a `AppFinanzas/config.local.php` en el servidor y completa host, usuario,
+   contraseña, nombre de BD y `api_key` (64 hex; la misma que usa la app en `secrets.properties`).
+   Para producción deja `'depurar' => false` (no se muestran detalles de errores al cliente).
+4. Sube los archivos PHP (incluido `.htaccess`). Sin `config.local.php` el servidor responde 500 «Servidor sin configurar».
+5. Elimina del servidor archivos obsoletos si existen: `PlanPagos.php`, `Perfil.php`, `diag.php`, `probar_login.html`.
+6. **Rotación de claves**: cambia la contraseña de MySQL en Hostinger y actualiza `config.local.php`; si cambias la
+   `api_key`, hay que recompilar la app con la nueva.
 
 ## Autenticación
 
-Todas las peticiones deben incluir la cabecera `X-API-Key: <clave>`. Sin ella (o incorrecta) → `401 {"status":"error","message":"No autorizado"}`.
-La clave viaja en el APK: protege contra accesos casuales y bots, no contra alguien que decompile tu app. Úsala siempre sobre HTTPS.
+Toda petición lleva la cabecera `X-API-Key: <clave>`; los endpoints de datos además exigen la sesión del usuario
+(token de `Auth/Login.php`). Cada consulta se filtra por el `uid` del usuario. Sin clave o con clave incorrecta → `401`.
+La clave viaja en el APK: protege contra accesos casuales, no contra quien decompile la app. Usar siempre HTTPS.
 
-## Contrato de respuestas (heredado, se mantiene por compatibilidad con la app)
+## Contrato de respuestas
 
-- Gastos / Categorías / Estados: texto plano ("Gasto insertado correctamente.", …). La app detecta el éxito buscando ese texto.
-- Presupuestos: JSON `{"status":"success|error","message":"…"}`.
-- Movimientos / Inversiones / PlanPagos / TipoInversión: JSON (`{"id":n}`, `{"updated":bool}`, `{"deleted":bool}`, `{"error":"…"}`).
-- Errores de validación se devuelven con HTTP 200 y mensaje claro (la app muestra el mensaje); errores de autenticación/servidor usan 401/500.
+- Mayoría de endpoints: JSON (`{"id":n}`, `{"updated":bool}`, `{"deleted":bool}`, `{"error":"…"}`).
+- Errores de validación: HTTP 200 con `{"error":"mensaje"}` (la app lo muestra); autenticación/servidor: 401/500.
+- Gastos, Categorías y Estados conservan respuestas de texto plano por compatibilidad con la app.
+- Dinero: se maneja en la moneda original de cada registro (COP, USD…); nunca se convierte entre monedas.
 
-## Pruebas locales
+## Pruebas
+
+```bash
+php tests/run.php          # lógica pura, no necesita base de datos; sale con código 1 si algo falla
+```
+
+Pruebas manuales contra un servidor local:
 
 ```bash
 APPFINANZAS_CONFIG=/ruta/test_config.php php -S 127.0.0.1:8081 -t AppFinanzas
-curl -H "X-API-Key: <clave>" "http://127.0.0.1:8081/Presupuesto/Presupuestos.php?mes=1&anho=2025"
+curl -H "X-API-Key: <clave>" "http://127.0.0.1:8081/Inicio/Dashboard.php"
 ```
