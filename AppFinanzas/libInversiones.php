@@ -1,6 +1,7 @@
 <?php
 // Lógica compartida del módulo de Inversiones (dinero prestado o invertido) y su plan de cobros.
-// Solo define funciones. Requiere que db.php ya esté cargado.
+// Solo define funciones. Requiere que db.php ya esté cargado. Usa lib.php (parámetros, aporte al fondo desde el presupuesto).
+require_once __DIR__ . '/lib.php';
 //
 // Tipos de inversión (tabla TablaTipoInversion):
 //   1 Acciones con dividendos     -> las cuotas (dividendos) se registran a mano
@@ -782,7 +783,7 @@ function invCalcularResumen($hoy, $moneda = 'COP') {
 }
 
 // ---------------------------------------------------------------- Fondo de inversión (migración 011)
-// Disponible para invertir = Ingresos - Retiros + Ajustes (descuadre) + lo cobrado (capital, intereses, dividendos) - capital desembolsado.
+// Disponible para invertir = Ingresos (externos + aportes pagados desde el presupuesto) - Retiros + Ajustes (descuadre) + lo cobrado (capital, intereses, dividendos) - capital desembolsado.
 // Invertido = capital que sigue en la calle. El «descuadre» es la suma de los ajustes: lo que el usuario declaró distinto de lo que la app calculaba.
 // Devuelve null si la tabla aún no existe.
 function invTotalesFondo($moneda = 'COP') {
@@ -798,6 +799,15 @@ function invTotalesFondo($moneda = 'COP') {
     $stmt->execute();
     $t = ['Ingreso' => 0.0, 'Retiro' => 0.0, 'Ajuste' => 0.0, 'movimientos' => 0];
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) { $t[$f['Tipo']] = (float)$f['t']; $t['movimientos'] += (int)$f['n']; }
+    // Ingresos que vienen del presupuesto: lo pagado en los gastos «Aporte al fondo de inversión» (solo COP; migración 023).
+    $t['Presupuesto'] = 0.0;
+    if ($moneda === 'COP' && gastosTieneAporteFondo()) {
+        $q = $mysql->prepare("SELECT COALESCE(SUM(g.valorGastosMovimiento), 0) AS t FROM gastos g
+            INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto WHERE g.AporteFondo = 1 AND p.IdUsuario = ?");
+        $q->bind_param('i', $uid);
+        $q->execute();
+        $t['Presupuesto'] = (float)$q->get_result()->fetch_assoc()['t'];
+    }
     return $t;
 }
 
@@ -807,16 +817,39 @@ function invCalcularFondo($desembolsado, $retornos, $invertido, $perdido, $moned
     } catch (mysqli_sql_exception $e) {
         return null; // migración 011 sin ejecutar
     }
-    $disponible = round($t['Ingreso'] - $t['Retiro'] + $t['Ajuste'] + $retornos - $desembolsado, 2);
+    $disponible = round($t['Ingreso'] + $t['Presupuesto'] - $t['Retiro'] + $t['Ajuste'] + $retornos - $desembolsado, 2);
     return [
         'moneda' => invMonedaValida($moneda),
         'disponible' => $disponible,
         'invertido' => round($invertido, 2),
         'patrimonio' => round($disponible + $invertido, 2),
-        'ingresos' => $t['Ingreso'], 'retiros' => $t['Retiro'], 'descuadre' => $t['Ajuste'],
+        'ingresos' => $t['Ingreso'], 'ingresosPresupuesto' => $t['Presupuesto'], 'aporteMensual' => (float)parametroApp('aporte_fondo_mensual'), 'retiros' => $t['Retiro'], 'descuadre' => $t['Ajuste'],
         'cobrado' => round($retornos, 2), 'desembolsado' => round($desembolsado, 2), 'perdido' => round($perdido, 2),
         'movimientos' => $t['movimientos'],
         // Sin movimientos y con inversiones registradas, el disponible sale negativo: falta declarar cuánto hay (conciliar).
-        'sinConciliar' => $t['movimientos'] === 0 && $desembolsado > 0,
+        'sinConciliar' => $t['movimientos'] === 0 && $t['Presupuesto'] <= 0 && $desembolsado > 0,
     ];
+}
+
+// Regla del fondo: no se puede poner dinero en una inversión (crearla, subirle el capital o agregarle un aporte)
+// si el fondo de inversión no tiene disponible suficiente; así el fondo nunca queda en descubierto.
+// $valor = dinero NUEVO que sale del fondo (en la moneda indicada). Devuelve null si se puede, o el mensaje de error.
+// Si la migración 011 no está ejecutada no hay fondo que validar y se permite (igual que antes).
+// No aplica a la reinversión de un dividendo: ese dinero ya está contado como cobrado y no sale del fondo.
+function invValidarFondo($valor, $moneda = 'COP') {
+    if ($valor <= 0.005) return null;
+    $moneda = invMonedaValida($moneda);
+    $res = invCalcularResumen(date('Y-m-d'), $moneda);
+    $f = $res['fondo'] ?? null;
+    if ($f === null) return null;
+    $fmt = function ($n) use ($moneda) { return ($moneda === 'USD' ? 'US$ ' : '$') . number_format($n, $moneda === 'USD' ? 2 : 0, ',', '.'); };
+    if (!empty($f['sinConciliar'])) {
+        return 'Primero declara cuánto dinero tienes en el fondo de inversión (Fondo → Conciliar o Ingresar dinero) y luego registra la inversión.';
+    }
+    $disp = (float)$f['disponible'];
+    if ($valor > $disp + 0.005) {
+        return 'Fondo insuficiente: necesitas ' . $fmt($valor) . ' y el fondo de inversión tiene disponible ' . $fmt(max($disp, 0)) .
+               '. Ingresa primero ' . $fmt($valor - max($disp, 0)) . ' al fondo.';
+    }
+    return null;
 }

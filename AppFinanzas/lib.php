@@ -72,7 +72,7 @@ function sincronizarGastoEstado($idGasto) {
     if ($idGasto <= 0) return;
 
     $colLugar = gastosTieneLugar() ? "g.idLugar" : "NULL";
-    $stmt = $mysql->prepare("SELECT g.CostoPrevisto, g.IdEstado, e.NombreEstado, $colLugar AS lugar,
+    $stmt = $mysql->prepare("SELECT g.CostoPrevisto, g.IdEstado, g.idObligacion, e.NombreEstado, $colLugar AS lugar,
             (SELECT COALESCE(SUM(m.valorMovimiento),0) FROM movimientos m WHERE m.idGasto = g.idGastos) AS total,
             (SELECT MAX(m.fechaMovimiento) FROM movimientos m WHERE m.idGasto = g.idGastos) AS ultima
         FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado
@@ -81,7 +81,20 @@ function sincronizarGastoEstado($idGasto) {
     $stmt->bind_param('ii', $idGasto, $uid);
     $stmt->execute();
     $g = $stmt->get_result()->fetch_assoc();
-    if (!$g || !in_array($g['NombreEstado'], ['Pendiente', 'En proceso', 'Pagado', 'Guardado'], true)) return;
+    if (!$g) return;
+    // Provisión de una obligación anual: nace Pendiente (hay que apartar la plata) y pasa a Acumulado cuando se registra el primer
+    // movimiento (lo apartado cuenta como ahorro de la obligación, no como gasto). Sin movimientos vuelve a Pendiente.
+    if ($g['idObligacion'] !== null && in_array($g['NombreEstado'], ['Pendiente', 'En proceso', 'Pagado', 'Acumulado'], true)) {
+        $nuevo = (float)$g['total'] > 0 ? 'Acumulado' : 'Pendiente';
+        if ($nuevo === $g['NombreEstado']) return;
+        $est = estadoGastoPorNombre($nuevo);
+        if (!$est) return;
+        $q = $mysql->prepare("UPDATE gastos SET IdEstado = ? WHERE idGastos = ?");
+        $q->bind_param('ii', $est, $idGasto);
+        $q->execute();
+        return;
+    }
+    if (!in_array($g['NombreEstado'], ['Pendiente', 'En proceso', 'Pagado', 'Guardado'], true)) return;
 
     $total = (float)$g['total'];
     $previsto = (float)$g['CostoPrevisto'];
@@ -428,13 +441,64 @@ function ahorradoObligacion($idObligacion, $cicloInicio) {
     return $total;
 }
 
-// Crea, en el presupuesto de $mes/$anho, un gasto "Acumulado" de provisión por cada obligación activa
+// true si existe la migración 023 (gastos.AporteFondo).
+function gastosTieneAporteFondo() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gastos' AND column_name = 'AporteFondo'");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] > 0;
+    }
+    return $tiene;
+}
+
+// Categoría para el aporte al fondo: la del usuario que se llame «Ahorros…» o «Inversi…»; si no hay, crea «Ahorros o inversiones».
+function categoriaAporteFondo() {
+    global $mysql, $uid;
+    $q = $mysql->prepare("SELECT idCategoriaGastos FROM categoriagastos WHERE IdUsuario = ? AND (NombreCategoria LIKE 'Ahorro%' OR NombreCategoria LIKE 'Inversi%') ORDER BY idCategoriaGastos LIMIT 1");
+    $q->bind_param('i', $uid);
+    $q->execute();
+    $f = $q->get_result()->fetch_assoc();
+    if ($f) return (int)$f['idCategoriaGastos'];
+    $nombre = 'Ahorros o inversiones'; $color = 2555903; $img = 'ic_savings';
+    $q = $mysql->prepare("INSERT INTO categoriagastos (NombreCategoria, ColorCategoria, ImagenCategoria, IdUsuario) VALUES (?, ?, ?, ?)");
+    $q->bind_param('sisi', $nombre, $color, $img, $uid);
+    $q->execute();
+    return (int)$mysql->insert_id;
+}
+
+// Crea en el presupuesto el gasto Pendiente «Aporte al fondo de inversión» por el valor configurado (aporte_fondo_mensual),
+// si está activado y el presupuesto aún no lo tiene. Lo que se pague de ese gasto cuenta como ingreso al fondo (invTotalesFondo).
+// Devuelve 1 si lo creó, 0 si no.
+function provisionarAporteFondo($mes, $anho, $idPresupuesto) {
+    global $mysql, $uid;
+    $valor = parametroApp('aporte_fondo_mensual');
+    if ($valor <= 0 || !gastosTieneAporteFondo() || !appfinanzas_es_propio('presupuestos', $idPresupuesto)) return 0;
+    $chk = $mysql->prepare("SELECT COUNT(*) c FROM gastos WHERE idPresupuesto = ? AND AporteFondo = 1");
+    $chk->bind_param('i', $idPresupuesto);
+    $chk->execute();
+    if ((int)$chk->get_result()->fetch_assoc()['c'] > 0) return 0;
+    $idPendiente = estadoGastoPorNombre('Pendiente');
+    if (!$idPendiente) return 0;
+    $cat = categoriaAporteFondo();
+    $nombre = 'Aporte al fondo de inversión';
+    $costo = (float)$valor;
+    $obs = 'Lo que pagues aquí entra al fondo de inversión';
+    $fechaPago = sprintf('%04d-%02d-01', $anho, $mes);
+    $ins = $mysql->prepare("INSERT INTO gastos (IdCategoria, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, FechaPago, Observaciones, IdEstado, idPresupuesto, AporteFondo)
+        VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 1)");
+    $ins->bind_param('isddssii', $cat, $nombre, $costo, $costo, $fechaPago, $obs, $idPendiente, $idPresupuesto);
+    $ins->execute();
+    return 1;
+}
+
+// Crea, en el presupuesto de $mes/$anho, un gasto "Pendiente" de provisión por cada obligación activa
 // que aún no tenga uno. Devuelve ['insertados' => n, 'omitidos' => n].
 function provisionarObligaciones($mes, $anho, $idPresupuesto) {
     global $mysql, $uid;
     if (!appfinanzas_es_propio('presupuestos', $idPresupuesto)) return ['insertados' => 0, 'omitidos' => 0];
-    $idAcumulado = estadoGastoPorNombre('Acumulado');
-    if (!$idAcumulado) return ['insertados' => 0, 'omitidos' => 0];
+    $idPendiente = estadoGastoPorNombre('Pendiente'); // nace Pendiente; pasa a Acumulado al registrar el primer movimiento (sincronizarGastoEstado)
+    if (!$idPendiente) return ['insertados' => 0, 'omitidos' => 0];
 
     $insertados = 0; $omitidos = 0;
     $stmtObl = $mysql->prepare("SELECT * FROM obligaciones WHERE Activa = 1 AND IdUsuario = ?");
@@ -458,7 +522,7 @@ function provisionarObligaciones($mes, $anho, $idPresupuesto) {
         $fechaPago = sprintf('%04d-%02d-01', $anho, $mes);
         $ins = $mysql->prepare("INSERT INTO gastos (IdCategoria, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, FechaPago, Observaciones, IdEstado, idPresupuesto, idObligacion)
             VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)");
-        $ins->bind_param('isddssiii', $o['IdCategoria'], $nombre, $cuota, $cuota, $fechaPago, $obs, $idAcumulado, $idPresupuesto, $o['idObligacion']);
+        $ins->bind_param('isddssiii', $o['IdCategoria'], $nombre, $cuota, $cuota, $fechaPago, $obs, $idPendiente, $idPresupuesto, $o['idObligacion']);
         $ins->execute();
         $insertados++;
     }
@@ -472,6 +536,7 @@ const PARAMETROS_APP = [
     'dias_aviso_pagos' => [3, 0, 30],                 // días de anticipación para avisar pagos y cobros
     'dias_aviso_obligaciones' => [30, 0, 120],        // anticipación de las obligaciones anuales (SOAT, impuestos...)
     'dia_inicio_mes' => [1, 1, 31],                   // día en que empieza el mes financiero (p. ej. 25 = pago de nómina)
+    'aporte_fondo_mensual' => [0, 0, 100000000],      // COP que cada presupuesto nuevo aparta para el fondo de inversión; 0 = desactivado
     'porcentaje_alerta_presupuesto' => [80, 0, 100],  // avisa al llegar a este % del presupuesto; 0 = desactivado
 ];
 

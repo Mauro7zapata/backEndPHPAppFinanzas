@@ -77,6 +77,7 @@ function procesarAccion($data) {
 
                 if ($crear) {
                     $moneda = invMonedaValida($data['Moneda'] ?? 'COP');
+                    if ($e = invValidarFondo($capital, $moneda)) { echo json_encode(['error' => $e], JSON_UNESCAPED_UNICODE); return; }
                     if ($moneda !== 'COP' && !invTieneMoneda()) {
                         echo json_encode(['error' => 'Falta ejecutar la migración 013 (moneda de inversiones) en la base de datos. No se guardó para evitar registrarla en pesos.'], JSON_UNESCAPED_UNICODE);
                         return;
@@ -96,6 +97,10 @@ function procesarAccion($data) {
                     $id = appfinanzas_entero($data['idInversion'] ?? null);
                     if ($id === null) { echo json_encode(['error' => 'Falta idInversion']); return; }
                     $anterior = invCargar($id);
+                    // Subir el capital saca dinero nuevo del fondo; bajarlo o dejarlo igual no se valida.
+                    if ($anterior && ($e = invValidarFondo($capital - (float)$anterior['CapitalInvertido'], $anterior['Moneda'] ?? 'COP'))) {
+                        echo json_encode(['error' => $e], JSON_UNESCAPED_UNICODE); return;
+                    }
                     $stmt = $mysql->prepare("UPDATE Inversiones SET Nombre=?, IdTipo=?, CapitalInvertido=?, FechaInicio=?, FechaFin=?, Interes=?, NroCuotas=?, CuotaPactada=?, PeriodicidadPagoDividendos=?, idEstado=? WHERE idInversion=? AND IdUsuario=?");
                     $stmt->bind_param('sidssdidiiii', $nombre, $tipo, $capital, $inicio, $fin, $tasa, $nro, $cuota, $per, $estado, $id, $uid);
                     $stmt->execute();

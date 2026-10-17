@@ -165,12 +165,15 @@ function aplicarPlantilla($data) {
 
     $insertados = 0; $omitidos = 0;
     $provisiones = ['insertados' => 0, 'omitidos' => 0];
+    $aporteFondo = 0;
     $mysql->begin_transaction();
     try {
-        // Provisión de obligaciones anuales (gastos "Acumulado"), salvo que el cliente pida lo contrario.
+        // Provisión de obligaciones anuales (gastos Pendiente que pasan a Acumulado al apartar), salvo que el cliente pida lo contrario.
         if (($data['incluirObligaciones'] ?? true) !== false) {
             $provisiones = provisionarObligaciones($mes, $anho, $idPresupuesto);
         }
+        // Aporte mensual al fondo de inversión (si el usuario lo activó en el fondo).
+        $aporteFondo = provisionarAporteFondo($mes, $anho, $idPresupuesto);
         $ins = $mysql->prepare("INSERT INTO gastos (IdCategoria, NombreGasto, CostoPrevisto, CostoReal, FechaLimite, FechaPago, Observaciones, IdEstado, idPresupuesto, idDeuda)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         foreach ($sugeridos as $g) {
@@ -188,8 +191,8 @@ function aplicarPlantilla($data) {
         $mysql->rollback();
         throw $e;
     }
-    if ($insertados > 0 || $provisiones['insertados'] > 0) evaluarCierrePresupuesto($idPresupuesto);
-    echo json_encode(['insertados' => $insertados, 'omitidos' => $omitidos, 'provisiones' => $provisiones['insertados']]);
+    if ($insertados > 0 || $provisiones['insertados'] > 0 || $aporteFondo > 0) evaluarCierrePresupuesto($idPresupuesto);
+    echo json_encode(['insertados' => $insertados, 'omitidos' => $omitidos, 'provisiones' => $provisiones['insertados'], 'aporteFondo' => $aporteFondo]);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

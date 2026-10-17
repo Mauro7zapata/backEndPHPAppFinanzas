@@ -21,7 +21,7 @@ AppFinanzas/
   Inteligencia/          Sugerencias basadas en los datos reales del usuario
   Configuracion/         Parametros, Comentarios (con imágenes y comunidad), Exportar (JSON para IA)
   Estados.php            Catálogo de estados
-sql/                     Migraciones 001–022 (ejecutar en orden; hacer copia de la BD antes)
+sql/                     Migraciones 001–023 (ejecutar en orden; hacer copia de la BD antes)
 tests/run.php            Pruebas de la lógica pura (fechas, ciclos de tarjeta, resumen de inversiones)
 AMBIENTES.md             Cómo separar desarrollo (dev) y producción (prd)
 CHANGELOG.md             Historial de cambios
@@ -30,7 +30,7 @@ CHANGELOG.md             Historial de cambios
 ## Instalación / actualización en el servidor
 
 1. Haz una copia de seguridad de la BD (phpMyAdmin > Exportar).
-2. Ejecuta en orden las migraciones de `sql/` que aún no hayas aplicado (001 → 022).
+2. Ejecuta en orden las migraciones de `sql/` que aún no hayas aplicado (001 → 023).
 3. Copia `AppFinanzas/config.example.php` a `AppFinanzas/config.local.php` en el servidor y completa host, usuario,
    contraseña, nombre de BD y `api_key` (64 hex; la misma que usa la app en `secrets.properties`).
    Para producción deja `'depurar' => false` (no se muestran detalles de errores al cliente).

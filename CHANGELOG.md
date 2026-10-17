@@ -1,5 +1,17 @@
 # Changelog · Backend
 
+## 2026-10-17 — Provisiones de obligaciones «Pendiente» y aporte mensual al fondo
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Provisión de obligaciones | lib.php (`provisionarObligaciones`, `sincronizarGastoEstado`) | El gasto «Provisión: …» nace **Pendiente** (antes Acumulado). Al registrar el primer movimiento pasa a Acumulado (lo apartado cuenta como ahorro de la obligación); si se borran los movimientos vuelve a Pendiente | Lo correcto: hasta que no apartas la plata, es un pago pendiente del mes | Presupuestos ya creados no cambian solos: ver script opcional en 023 |
+| Aporte mensual al fondo | lib.php (`provisionarAporteFondo`, `categoriaAporteFondo`, parámetro `aporte_fondo_mensual`), Presupuesto/Plantilla.php, libInversiones.php (`invTotalesFondo`, `invCalcularFondo`), sql/023 | Si el usuario fija un aporte, cada presupuesto nuevo crea el gasto Pendiente «Aporte al fondo de inversión». Lo pagado de ese gasto entra al fondo como ingreso (COP). Los ingresos manuales quedan como «externos» (dinero que no pasó por el presupuesto). El fondo devuelve `ingresosPresupuesto` y `aporteMensual` | Que el dinero del presupuesto llegue al fondo con trazabilidad, sin doble digitación | Requiere migración 023. Borrar el gasto quita ese ingreso. Solo COP |
+| Dependencias | libInversiones.php | Ahora hace `require_once` de lib.php | Usa parámetros y el aporte al fondo | Ninguno |
+
+## 2026-10-17 — Invertir exige dinero en el fondo
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Restricción de fondo | libInversiones.php (`invValidarFondo`), Inversiones/inversion.php, Inversiones/Aportes.php | Crear una inversión, subir su capital o agregar/subir un aporte se rechaza si el valor nuevo supera el disponible del fondo (misma moneda). Mensaje: cuánto falta y cuánto ingresar. Sin movimientos en el fondo pide declararlo primero | Que el fondo nunca quede en descubierto | No aplica a reinversión de dividendos, bajar capital ni editar sin subir capital. Sin migración 011 no se valida. La app ya muestra el error del servidor (sin cambios en Android) |
+
 ## 2026-10-14 — Pruebas y documentación
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|

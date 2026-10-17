@@ -61,6 +61,7 @@ try {
             if ($e = validarAporte($d)) { echo json_encode(['error' => $e]); break; }
             $valor = round((float)$d['valor'], 2); $fecha = $d['fecha'];
             $obs = invObservacion($d['observaciones'] ?? null);
+            if ($e = invValidarFondo($valor, $inv['Moneda'] ?? 'COP')) { echo json_encode(['error' => $e], JSON_UNESCAPED_UNICODE); break; }
             $mysql->begin_transaction();
             try {
                 if ($e = ajustarCapital($id, $valor)) { $mysql->rollback(); echo json_encode(['error' => $e], JSON_UNESCAPED_UNICODE); break; }
@@ -81,6 +82,8 @@ try {
             $valor = round((float)$d['valor'], 2); $fecha = $d['fecha'];
             $obs = invObservacion($d['observaciones'] ?? null);
             $idAporte = (int)$a['idAporte'];
+            $invDeAporte = invCargar((int)$a['idInversion']);
+            if ($e = invValidarFondo($valor - (float)$a['Valor'], $invDeAporte['Moneda'] ?? 'COP')) { echo json_encode(['error' => $e], JSON_UNESCAPED_UNICODE); break; }
             $mysql->begin_transaction();
             try {
                 if ($e = ajustarCapital((int)$a['idInversion'], $valor - (float)$a['Valor'])) { $mysql->rollback(); echo json_encode(['error' => $e], JSON_UNESCAPED_UNICODE); break; }
