@@ -1,5 +1,10 @@
 # Changelog · Backend
 
+## 2026-10-27 — Pagar una deuda «desde un bolsillo»
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Abono desde un bolsillo | Deudas/Deudas.php (`movimiento` con `desdeBolsillo`, GET `?bolsillos=1&fecha=`), lib.php (`sincronizarAbonoMovimiento`) | Un abono puede descontarse de CUALQUIER gasto del mes que no esté vinculado a una deuda (p. ej. Mercado): se crea un solo movimiento en ese gasto y un solo abono a la deuda. El gasto no queda atado a la deuda; si se edita o borra el movimiento, el abono lo sigue | Compras con tarjeta pagadas con plata guardada: antes se contaban dos veces y subía el presupuesto | Sin migración. Un pago repartido entre varios gastos = varios abonos. El gasto «Pago tarjeta» queda con menos pagado: conviene bajar su previsto |
+
 ## 2026-10-17 — Provisiones de obligaciones «Pendiente» y aporte mensual al fondo
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|

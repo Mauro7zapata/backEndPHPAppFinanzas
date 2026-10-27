@@ -151,7 +151,10 @@ function sincronizarAbonoMovimiento($idMovimiento) {
     global $mysql, $uid;
     $idMovimiento = (int)$idMovimiento;
     // El movimiento debe ser del usuario (movimientos -> gastos -> presupuestos) y la deuda también (si no, se trata como sin deuda).
-    $stmt = $mysql->prepare("SELECT m.valorMovimiento, m.tipoMovimiento, m.fechaMovimiento, m.nombreGasto, d.idDeuda
+    // Si el gasto no está vinculado a una deuda pero el movimiento ya tiene un abono (pago «desde un bolsillo»), ese abono se conserva.
+    $stmt = $mysql->prepare("SELECT m.valorMovimiento, m.tipoMovimiento, m.fechaMovimiento, m.nombreGasto,
+            COALESCE(d.idDeuda, (SELECT md0.idDeuda FROM movimientos_deuda md0 INNER JOIN deudas d0 ON d0.idDeuda = md0.idDeuda
+                                  WHERE md0.idMovimiento = m.idMovimiento AND d0.IdUsuario = p.IdUsuario AND g.idDeuda IS NULL LIMIT 1)) AS idDeuda
         FROM movimientos m INNER JOIN gastos g ON g.idGastos = m.idGasto
         INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
         LEFT JOIN deudas d ON d.idDeuda = g.idDeuda AND d.IdUsuario = p.IdUsuario
