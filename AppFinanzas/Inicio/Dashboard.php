@@ -85,14 +85,17 @@ if ($p) {
     $presupuesto['abiertos'] = resumenCierrePresupuesto($idPresupuesto)['abiertos'];
 
     $stmt = $mysql->prepare("SELECT e.NombreEstado AS estado, COUNT(*) AS n,
-            COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(" . sqlValorEfectivoGasto() . "),0) AS pagado, COALESCE(SUM(" . sqlSeparadoGasto() . "),0) AS separado
+            COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(" . sqlValorEfectivoGasto() . "),0) AS pagado, COALESCE(SUM(" . sqlSeparadoGasto() . "),0) AS separado,
+            COALESCE(SUM(GREATEST(g.CostoPrevisto - " . sqlValorEfectivoGasto() . ", 0)),0) AS falta
         FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = ?
         WHERE g.idPresupuesto = ? GROUP BY e.NombreEstado");
     $stmt->bind_param('ii', $uid, $idPresupuesto);
     $stmt->execute();
     foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) {
         $presupuesto['gastosTotal'] += (int)$f['n'];
+        if ($f['estado'] === 'No aplica') continue;   // «No aplica»: no se espera ni se paga este mes, no entra en previsto ni por pagar
         $presupuesto['previsto'] += (float)$f['previsto'];
+        $presupuesto['porPagar'] += (float)$f['falta']; // lo que falta de CADA gasto (un gasto pagado de más no compensa a otro sin pagar)
         $presupuesto['pagado'] += (float)$f['pagado'];
         if (in_array($f['estado'], ['Guardado', 'Acumulado'], true)) $presupuesto['ahorrado'] += (float)$f['separado'];
         if ($f['estado'] === 'Guardado') { $presupuesto['guardado'] += (float)$f['separado']; $presupuesto['guardadoPrevisto'] += (float)$f['previsto']; }
@@ -104,7 +107,6 @@ if ($p) {
     // Saldo separado de hoy: todo lo guardado/acumulado en todos los meses, menos lo que ya usaste (migración 014) ± ajustes.
     $presupuesto['separadoSaldo'] = saldoSeparadoTotal();
     $presupuesto['gastadoConsumo'] = $presupuesto['pagado'] - $presupuesto['ahorrado'];
-    $presupuesto['porPagar'] = max(0.0, $presupuesto['previsto'] - $presupuesto['pagado']);
     $presupuesto['restante'] = $presupuesto['total'] - $presupuesto['pagado'];
     $presupuesto['libre'] = $presupuesto['total'] - $presupuesto['previsto'];
     $presupuesto['porcentajeUsado'] = $presupuesto['total'] > 0 ? round($presupuesto['pagado'] / $presupuesto['total'], 4) : 0.0;

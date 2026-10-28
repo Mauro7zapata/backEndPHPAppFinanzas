@@ -1,5 +1,10 @@
 # Changelog · Backend
 
+## 2026-10-28 — «Por pagar» y «Previsto» correctos
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Por pagar / Previsto | Inicio/Dashboard.php | «Por pagar» ahora suma lo que falta de cada gasto (previsto − pagado, mínimo 0) y ya no resta el total previsto del total pagado; los gastos «No aplica» no cuentan en Previsto ni en Por pagar | Mostraba $109,429 aunque solo faltaba aceite ($25,000): los gastos pagados de más compensaban a los pendientes y «No aplica» se sumaba al previsto | Cambian las cifras de Por pagar, Previsto, margen diario y proyección de cierre. Subir Dashboard.php |
+
 ## 2026-10-28 — Pago de tarjeta desde bolsillos con saldo
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|
