@@ -1,5 +1,10 @@
 # Changelog · Backend
 
+## 2026-10-28 — Pago de tarjeta desde bolsillos con saldo
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Lista de bolsillos | Deudas/Deudas.php (GET `?bolsillos=1`) | Solo devuelve gastos «Guardado» sin deuda con saldo (previsto − gastado > 0), con `restante`, y `banco`/`tipo` del lugar (migración 024). El POST rechaza un pago mayor al saldo del bolsillo. La observación del movimiento queda «💳 Pago de <deuda> desde este bolsillo · <nota>» | Mostrar solo bolsillos con plata y que el movimiento sea identificable en el presupuesto | Subir Deudas.php. Acumulado/Pendiente ya no aparecen como bolsillo |
+
 ## 2026-10-27 — Administrador por rol (reemplaza el código)
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|

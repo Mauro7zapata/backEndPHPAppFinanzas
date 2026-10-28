@@ -279,10 +279,22 @@ function procesarDeuda($d) {
                         $stmt->execute();
                         $g = $stmt->get_result()->fetch_assoc();
                         if (!$g) { echo json_encode(['error' => $bolsillo ? 'Ese gasto no existe o ya está vinculado a otra deuda' : 'El gasto no está vinculado a esta deuda']); return; }
+                        if ($bolsillo) { // el bolsillo debe tener saldo para cubrir el pago
+                            $sq = $mysql->prepare("SELECT g.CostoPrevisto - g.valorGastosMovimiento AS restante, e.NombreEstado FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado WHERE g.idGastos = ?");
+                            $sq->bind_param('i', $idGasto);
+                            $sq->execute();
+                            $sf = $sq->get_result()->fetch_assoc();
+                            if ($sf && $sf['NombreEstado'] === 'Guardado' && (float)$d['valor'] > (float)$sf['restante'] + 0.5) {
+                                echo json_encode(['error' => 'Ese bolsillo solo tiene disponible $' . number_format(max((float)$sf['restante'], 0), 0, ',', '.') . ' y el pago es mayor.']);
+                                return;
+                            }
+                        }
                         $mysql->begin_transaction();
                         try {
                             $tipoMov = 'Gasto';
-                            $obs = trim((string)$nota) !== '' ? mb_substr(trim($nota), 0, 500, 'UTF-8') : ($bolsillo ? 'Pago de ' . $deudaFila['Nombre'] . ' desde este bolsillo' : 'Abono registrado desde Deudas');
+                            $obs = $bolsillo
+                                ? mb_substr('💳 Pago de ' . $deudaFila['Nombre'] . ' desde este bolsillo' . (trim((string)$nota) !== '' ? ' · ' . trim($nota) : ''), 0, 500, 'UTF-8')
+                                : (trim((string)$nota) !== '' ? mb_substr(trim($nota), 0, 500, 'UTF-8') : 'Abono registrado desde Deudas');
                             $ins = $mysql->prepare("INSERT INTO movimientos (tipoMovimiento, valorMovimiento, nombreGasto, observacionMovimiento, fechaMovimiento, idGasto) VALUES (?, ?, ?, ?, ?, ?)");
                             $ins->bind_param('sdsssi', $tipoMov, $d['valor'], $g['NombreGasto'], $obs, $fecha, $idGasto);
                             $ins->execute();
@@ -420,21 +432,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
     procesarDeuda(is_array($input) ? $input : $_POST);
 } elseif (isset($_GET['bolsillos'])) {
-    // Gastos del mes financiero de la fecha que pueden pagar una deuda «desde un bolsillo» (no vinculados a ninguna deuda).
+    // Bolsillos del mes financiero de la fecha que pueden pagar una deuda: gastos «Guardado» (no vinculados a una deuda)
+    // que todavía tienen saldo por descontar (previsto - gastado > 0). Con la migración 024 traen banco y tipo del lugar.
     $fecha = $_GET['fecha'] ?? date('Y-m-d');
     if (!appfinanzas_fecha_valida($fecha)) $fecha = date('Y-m-d');
     [$mesB, $anhoB] = mesFinanciero($fecha, parametroApp('dia_inicio_mes'));
-    $stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento, e.NombreEstado, c.NombreCategoria" . sqlLugarGasto() . "
+    $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'lugares_guardado' AND column_name IN ('Banco','Tipo')");
+    $conClasificacion = gastosTieneLugar() && $r && (int)$r->fetch_assoc()['n'] === 2;
+    $extra = $conClasificacion
+        ? ", (SELECT ll.Banco FROM lugares_guardado ll WHERE ll.idLugar = g.idLugar AND ll.IdUsuario = p.IdUsuario) AS BancoLugar,
+             (SELECT ll.Tipo FROM lugares_guardado ll WHERE ll.idLugar = g.idLugar AND ll.IdUsuario = p.IdUsuario) AS TipoLugar"
+        : ", NULL AS BancoLugar, NULL AS TipoLugar";
+    $stmt = $mysql->prepare("SELECT g.idGastos, g.NombreGasto, g.CostoPrevisto, g.valorGastosMovimiento, e.NombreEstado, c.NombreCategoria" . sqlLugarGasto() . $extra . "
         FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
         INNER JOIN estados e ON e.idEstado = g.IdEstado
         LEFT JOIN categoriagastos c ON c.idCategoriaGastos = g.IdCategoria
-        WHERE p.IdUsuario = ? AND p.Mes = ? AND p.Anho = ? AND g.idDeuda IS NULL AND e.NombreEstado <> 'No aplica'
-        ORDER BY c.NombreCategoria, g.NombreGasto");
+        WHERE p.IdUsuario = ? AND p.Mes = ? AND p.Anho = ? AND g.idDeuda IS NULL AND e.NombreEstado = 'Guardado'
+          AND g.CostoPrevisto - g.valorGastosMovimiento > 0.5
+        ORDER BY g.NombreGasto");
     $stmt->bind_param('iii', $uid, $mesB, $anhoB);
     $stmt->execute();
     echo json_encode(['mes' => $mesB, 'anho' => $anhoB, 'gastos' => array_map(function ($f) {
         return ['idGasto' => (int)$f['idGastos'], 'nombre' => $f['NombreGasto'], 'estado' => $f['NombreEstado'], 'categoria' => $f['NombreCategoria'],
-                'previsto' => (float)$f['CostoPrevisto'], 'pagado' => (float)$f['valorGastosMovimiento'], 'lugar' => $f['NombreLugar'] ?? null];
+                'previsto' => (float)$f['CostoPrevisto'], 'pagado' => (float)$f['valorGastosMovimiento'],
+                'restante' => (float)$f['CostoPrevisto'] - (float)$f['valorGastosMovimiento'],
+                'lugar' => $f['NombreLugar'] ?? null, 'banco' => $f['BancoLugar'] ?? null, 'tipo' => $f['TipoLugar'] ?? null];
     }, $stmt->get_result()->fetch_all(MYSQLI_ASSOC))], JSON_UNESCAPED_UNICODE);
 } elseif (isset($_GET['historial'])) {
     try { historialDeudas(); } catch (mysqli_sql_exception $e) {
