@@ -36,9 +36,4 @@ return [
     // una clave compartida dentro de un APK no es segura para uso comercial.
     // 'api_key'         => 'LA_CLAVE_ANTIGUA_DE_AL_MENOS_32_CARACTERES',
     // 'api_key_usuario' => 1,
-
-    // Código de administrador de «Sugerencias y errores»: hash SHA-256 de un código largo y aleatorio. Con ese código
-    // la app permite ver todos los reportes, exportarlos con sus imágenes y cambiar su estado. Vacío = desactivado.
-    // Generar el hash:  php -r "echo hash('sha256', 'AF-XXXX-XXXX-XXXX'), PHP_EOL;"
-    'codigo_admin_sha256' => '',
 ];

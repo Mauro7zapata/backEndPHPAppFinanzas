@@ -15,12 +15,13 @@ header('Content-Type: application/json; charset=utf-8');
 //        apoyos (cuántos dicen «a mí también»), yoApoyo, mio, reaperturas. POST: apoyar {idComentario, nota?} | quitarApoyo {idComentario}
 //        | reabrir {idComentario, nota?} (solo reportes Resuelto/Descartado; pasan a «Nuevo») | visibilidad {idComentario, publico} (solo el dueño).
 //        crear acepta publico (por defecto 1). Las imágenes solo las ve el dueño.
-//   GET  Comentarios.php?imagen=ID -> bytes de la imagen (solo si el reporte es del usuario, o con cabecera X-Codigo-Admin válida)
+//   GET  Comentarios.php?imagen=ID -> bytes de la imagen (solo si el reporte es del usuario, o con cabecera X-Modo-Admin: 1 y la cuenta con rol administrador)
 //        La lista incluye imagenes:[ids] por reporte.
-//   Administración (el código se valida contra config.local.php -> codigo_admin_sha256):
-//        POST admin_validar {codigo} | admin_listar {codigo, estado?} (TODOS los reportes con versión, dispositivo, ambiente e imágenes)
-//        | admin_estado {codigo, idComentario, estado, respuesta?} (cambia el estado y, si se envía, la respuesta).
-//        Máx. 5 códigos erróneos cada 15 minutos por usuario; cada acción de administrador queda en el log (AUDITORIA).
+//   Administración (migración 025: usuarios.EsAdmin = 1; el rol se comprueba aquí, en el servidor, en CADA llamada):
+//        POST admin_validar | admin_listar {estado?} (TODOS los reportes con versión, dispositivo, ambiente e imágenes)
+//        | admin_estado {idComentario, estado, respuesta?} (cambia el estado y, si se envía, la respuesta).
+//        Una cuenta sin el rol recibe siempre un error genérico; máx. 5 intentos cada 15 minutos por usuario.
+//        Cada acción de administrador queda en el log (AUDITORIA).
 
 define('MSG_MIGRACION_019', 'Falta ejecutar la migración 019 en la base de datos');
 const COMENTARIOS_TIPOS = ['Mejora', 'Error'];
@@ -59,14 +60,14 @@ function validarImagenes($crudas) {
 
 
 // ---------------------------------------------------------------------------------------------
-// Administración: un código largo (solo lo conoce el dueño de la app) habilita ver/exportar todos los reportes y
-// cambiar su estado. En config.local.php solo se guarda su hash SHA-256. Los intentos fallidos se limitan por usuario.
+// Administración: la cuenta debe tener usuarios.EsAdmin = 1 (se asigna solo por SQL; la app no puede otorgarlo).
+// Ver/exportar todos los reportes y cambiar su estado exige ese rol. Los intentos de cuentas sin rol se limitan por usuario.
 // ---------------------------------------------------------------------------------------------
 const COMENTARIOS_ESTADOS = ['Nuevo', 'En revision', 'Planeado', 'Resuelto', 'Descartado'];
 const ADMIN_MAX_FALLOS = 5;
 const ADMIN_VENTANA_SEG = 900; // 15 minutos
 
-// Archivo temporal con los fallos recientes del usuario: [marcas de tiempo]. No requiere migración.
+// Archivo temporal con los intentos recientes sin rol del usuario: [marcas de tiempo]. No requiere migración.
 function adminArchivoFallos() {
     global $uid;
     return sys_get_temp_dir() . '/appfinanzas_admin_' . (int)$uid . '.json';
@@ -79,40 +80,31 @@ function adminFallosRecientes() {
     return array_values(array_filter(is_array($lista) ? $lista : [], function ($t) use ($limite) { return (int)$t >= $limite; }));
 }
 
-// true si el código es el de administrador. Devuelve false (y registra el fallo) si no; nunca revela por qué
-// (salvo con 'depurar' => true en config.local.php, que deja el motivo en $GLOBALS['admin_motivo'] para diagnosticar).
-function codigoAdminValido($codigo) {
-    global $appConfig, $uid;   // $config ya no existe: db.php la borra y deja en $appConfig los ajustes no sensibles
-    $esperado = strtolower((string)($appConfig['codigo_admin_sha256'] ?? ''));
-    if ($esperado === '' || strlen($esperado) !== 64) {                        // administración desactivada
-        $GLOBALS['admin_motivo'] = 'config.local.php no tiene un hash SHA-256 válido (largo ' . strlen($esperado) . ', debe ser 64)';
-        return false;
-    }
+// true si la cuenta autenticada tiene el rol de administrador. Si no (o si falta la migración 025) devuelve false,
+// registra el intento y nunca revela el motivo.
+function usuarioEsAdmin() {
+    global $mysql, $uid;
     $fallos = adminFallosRecientes();
-    if (count($fallos) >= ADMIN_MAX_FALLOS) {                                  // bloqueado temporalmente
-        $GLOBALS['admin_motivo'] = 'bloqueado por intentos fallidos';
-        return false;
+    if (count($fallos) >= ADMIN_MAX_FALLOS) return false;                      // bloqueado temporalmente
+    $esAdmin = false;
+    if ($mysql->query("SHOW COLUMNS FROM usuarios LIKE 'EsAdmin'")->num_rows > 0) {
+        $q = $mysql->prepare("SELECT EsAdmin FROM usuarios WHERE IdUsuario = ? AND Activo = 1");
+        $q->bind_param('i', $uid);
+        $q->execute();
+        $f = $q->get_result()->fetch_assoc();
+        $esAdmin = $f && (int)$f['EsAdmin'] === 1;
     }
-    // Se ignoran espacios, guiones y mayúsculas/minúsculas: así no importa cómo lo escriba o lo pegue el teclado.
-    $codigo = preg_replace('/[^A-Z0-9]/', '', strtoupper((string)$codigo));
-    $recibido = hash('sha256', $codigo);
-    if ($codigo !== '' && hash_equals($esperado, $recibido)) return true;
-    $GLOBALS['admin_motivo'] = 'no coincide: recibí ' . strlen($codigo) . ' caracteres, hash ' . substr($recibido, 0, 8) . '…, esperado ' . substr($esperado, 0, 8) . '…';
+    if ($esAdmin) return true;
     $fallos[] = time();
     @file_put_contents(adminArchivoFallos(), json_encode($fallos), LOCK_EX);
-    error_log('[AppFinanzas][AUDITORIA] código de administrador incorrecto (usuario ' . (int)$uid . ', fallos recientes ' . count($fallos) . ')');
-    usleep(800000); // frena la adivinanza
+    error_log('[AppFinanzas][AUDITORIA] intento de administración sin rol (usuario ' . (int)$uid . ', recientes ' . count($fallos) . ')');
+    usleep(800000); // frena la insistencia
     return false;
 }
 
-// Mensaje cuando el código no sirve (distingue el bloqueo para que la persona sepa que debe esperar).
+// Mensaje genérico: no distingue entre «sin rol», «bloqueado» o «sin migración».
 function adminMensajeRechazo() {
-    $mensaje = count(adminFallosRecientes()) >= ADMIN_MAX_FALLOS
-        ? 'Demasiados intentos. Espera 15 minutos e inténtalo de nuevo.'
-        : 'Código de administrador incorrecto';
-    // Solo en modo depuración se añade el motivo exacto (nunca en producción).
-    if (!empty($GLOBALS['appfinanzas_depurar']) && !empty($GLOBALS['admin_motivo'])) $mensaje .= ' [' . $GLOBALS['admin_motivo'] . ']';
-    return $mensaje;
+    return 'Función no disponible';
 }
 
 // TODOS los reportes (de todos los usuarios) con los datos para reproducir errores y las ids de sus imágenes.
@@ -154,8 +146,8 @@ function tablaApoyosExiste() {
 
 function enviarImagen($id) {
     global $mysql, $uid;
-    // El administrador (cabecera X-Codigo-Admin) puede ver las imágenes de cualquier reporte; los demás, solo las suyas.
-    $admin = isset($_SERVER['HTTP_X_CODIGO_ADMIN']) && codigoAdminValido($_SERVER['HTTP_X_CODIGO_ADMIN']);
+    // El administrador (cabecera X-Modo-Admin + rol) puede ver las imágenes de cualquier reporte; los demás, solo las suyas.
+    $admin = isset($_SERVER['HTTP_X_MODO_ADMIN']) && usuarioEsAdmin();
     if ($admin) {
         $q = $mysql->prepare("SELECT Mime, Imagen FROM comentarios_app_imagenes WHERE idImagen = ?");
         $q->bind_param('i', $id);
@@ -340,13 +332,13 @@ function procesarComentario($d) {
             break;
 
         case 'admin_validar':
-            if (!codigoAdminValido($d['codigo'] ?? '')) { echo json_encode(['error' => adminMensajeRechazo()]); return; }
+            if (!usuarioEsAdmin()) { echo json_encode(['error' => adminMensajeRechazo()]); return; }
             error_log('[AppFinanzas][AUDITORIA] administrador validado (usuario ' . (int)$uid . ')');
             echo json_encode(['ok' => true]);
             break;
 
         case 'admin_listar':
-            if (!codigoAdminValido($d['codigo'] ?? '')) { echo json_encode(['error' => adminMensajeRechazo()]); return; }
+            if (!usuarioEsAdmin()) { echo json_encode(['error' => adminMensajeRechazo()]); return; }
             $estado = isset($d['estado']) && in_array($d['estado'], COMENTARIOS_ESTADOS, true) ? $d['estado'] : null;
             $todos = listarParaAdmin($estado);
             error_log('[AppFinanzas][AUDITORIA] administrador listó ' . count($todos) . ' reportes (usuario ' . (int)$uid . ')');
@@ -354,7 +346,7 @@ function procesarComentario($d) {
             break;
 
         case 'admin_estado':
-            if (!codigoAdminValido($d['codigo'] ?? '')) { echo json_encode(['error' => adminMensajeRechazo()]); return; }
+            if (!usuarioEsAdmin()) { echo json_encode(['error' => adminMensajeRechazo()]); return; }
             $id = appfinanzas_entero($d['idComentario'] ?? null);
             $estado = (string)($d['estado'] ?? '');
             if ($id === null || !in_array($estado, COMENTARIOS_ESTADOS, true)) { echo json_encode(['error' => 'Reporte o estado no válido']); return; }

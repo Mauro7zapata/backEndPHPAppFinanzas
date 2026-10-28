@@ -1,5 +1,15 @@
 # Changelog · Backend
 
+## 2026-10-27 — Administrador por rol (reemplaza el código)
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Rol de administrador | sql/025_usuarios_es_admin.sql, Configuracion/Comentarios.php (`usuarioEsAdmin`), db.php, config.example.php | `admin_validar`/`admin_listar`/`admin_estado` y las imágenes ajenas (cabecera `X-Modo-Admin`) exigen `usuarios.EsAdmin = 1`, comprobado en cada llamada. Sin rol: error genérico «Función no disponible», máx. 5 intentos/15 min y log de auditoría. Se elimina `codigo_admin_sha256` | El código se perdía y no daba trazabilidad; el rol queda ligado a la cuenta | Requiere migración 025 y asignar el rol por SQL. Subir Comentarios.php y db.php; quitar `codigo_admin_sha256` de config.local.php (ya no se lee). La app anterior deja de poder administrar |
+
+## 2026-10-27 — Lugares de guardado: banco y tipo
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Clasificación de lugares | Presupuesto/LugaresGuardado.php, sql/024_lugares_banco_tipo.sql | Cada lugar tiene `banco` (o «Físico») y `tipo` (Bolsillo/Meta/Otro); el listado devuelve saldo y total; crear/editar los recibe. Los ajustes de saldo siguen en `separado_usos` (historial) | Ubicar el dinero cuando hay muchos lugares y poder reajustar si se pierde la traza | Requiere migración 024 (idempotente) y subir LugaresGuardado.php. Sin migración sigue funcionando sin clasificar |
+
 ## 2026-10-27 — Pagar una deuda «desde un bolsillo»
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|

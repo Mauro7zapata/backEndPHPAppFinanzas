@@ -12,7 +12,8 @@ header('Content-Type: application/json; charset=utf-8');
 //   GET  LugaresGuardado.php?historial=1&idLugar=ID -> {movimientos:[{idUso, fecha, tipo (Uso|Ajuste), valor, nota}]}  (idLugar 0 = sin lugar)
 //   GET  LugaresGuardado.php?origen=1&idLugar=ID -> {gastos:[{idGasto, nombre, estado, mes, anho, previsto, movimientos, aporte}], movimientos:[...como historial, sin límite],
 //                                                   aportado, usado, ajuste, saldo}   «de dónde sale el saldo»: cada gasto Guardado/Acumulado que aporta + usos y ajustes
-//   POST (JSON) accion: crear {nombre} | renombrar {idLugar, nombre} | eliminar {idLugar}
+//        Cada lugar trae también banco (Nequi, Bancolombia, Físico… o null) y tipo (Bolsillo | Meta | Otro) si se ejecutó la migración 024.
+//   POST (JSON) accion: crear {nombre, banco?, tipo?} | renombrar {idLugar, nombre} | actualizar {idLugar, nombre, banco?, tipo?} | eliminar {idLugar}
 //        usar     {idLugar, valor, fecha?, nota?}   sacas dinero de lo guardado (migración 014)
 //        corregir {idLugar, saldoReal, nota?}       declaras cuánto tienes de verdad ahí; la diferencia queda como ajuste
 //        eliminarMovimiento {idUso}
@@ -27,24 +28,50 @@ function nombreLugarValido($nombre) {
     return $n === '' ? null : $n;
 }
 
+const TIPOS_LUGAR = ['Bolsillo', 'Meta', 'Otro'];
+
+// true si existe la migración 024 (lugares_guardado.Banco y .Tipo). Sin ella el servidor sigue funcionando sin clasificación.
+function lugaresTieneClasificacion() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'lugares_guardado' AND column_name IN ('Banco','Tipo')");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] === 2;
+    }
+    return $tiene;
+}
+
+// Banco: texto libre corto («Nequi», «Bancolombia», «Físico»…); vacío = sin banco.
+function bancoLugarValido($v) {
+    $b = mb_substr(trim((string)$v), 0, 40, 'UTF-8');
+    return $b === '' ? null : $b;
+}
+
+function tipoLugarValido($v) {
+    $t = trim((string)$v);
+    foreach (TIPOS_LUGAR as $ok) if (mb_strtolower($ok, 'UTF-8') === mb_strtolower($t, 'UTF-8')) return $ok;
+    return 'Bolsillo';
+}
+
 function detalleLugares() {
     global $mysql, $uid;
 
-    $q = $mysql->prepare("SELECT idLugar, Nombre FROM lugares_guardado WHERE IdUsuario = ? ORDER BY Nombre");
+    $cols = lugaresTieneClasificacion() ? ", Banco, Tipo" : ", NULL AS Banco, 'Bolsillo' AS Tipo";
+    $q = $mysql->prepare("SELECT idLugar, Nombre$cols FROM lugares_guardado WHERE IdUsuario = ? ORDER BY Nombre");
     $q->bind_param('i', $uid);
     $q->execute();
     $filasLugares = $q->get_result()->fetch_all(MYSQLI_ASSOC); // leer antes de lanzar otras consultas
     $saldos = saldoSeparadoPorLugar();
-    $fila = function ($id, $nombre, $v) {
+    $fila = function ($id, $nombre, $v, $banco = null, $tipo = 'Bolsillo') {
         $v = $v ?? ['guardado' => 0.0, 'acumulado' => 0.0, 'usado' => 0.0, 'ajuste' => 0.0, 'gastos' => 0, 'saldo' => 0.0];
-        return ['idLugar' => $id, 'nombre' => $nombre, 'guardado' => $v['guardado'], 'acumulado' => $v['acumulado'],
+        return ['idLugar' => $id, 'nombre' => $nombre, 'banco' => $banco, 'tipo' => $tipo, 'guardado' => $v['guardado'], 'acumulado' => $v['acumulado'],
             'usado' => $v['usado'], 'ajuste' => $v['ajuste'], 'saldo' => $v['saldo'], 'total' => $v['saldo'], 'gastos' => $v['gastos']];
     };
     $lugares = [];
     $total = 0.0;
     foreach ($filasLugares as $l) {
         $id = (int)$l['idLugar'];
-        $lugares[] = $fila($id, $l['Nombre'], $saldos[$id] ?? null);
+        $lugares[] = $fila($id, $l['Nombre'], $saldos[$id] ?? null, $l['Banco'], $l['Tipo']);
         $total += ($saldos[$id]['saldo'] ?? 0.0);
         unset($saldos[$id]);
     }
@@ -144,10 +171,32 @@ try {
         case 'crear':
             $nombre = nombreLugarValido($d['nombre'] ?? '');
             if ($nombre === null) { echo json_encode(['error' => 'Escribe el nombre del lugar']); break; }
-            $q = $mysql->prepare("INSERT INTO lugares_guardado (IdUsuario, Nombre) VALUES (?, ?)");
-            $q->bind_param('is', $uid, $nombre);
+            if (lugaresTieneClasificacion()) {
+                $banco = bancoLugarValido($d['banco'] ?? null); $tipo = tipoLugarValido($d['tipo'] ?? 'Bolsillo');
+                $q = $mysql->prepare("INSERT INTO lugares_guardado (IdUsuario, Nombre, Banco, Tipo) VALUES (?, ?, ?, ?)");
+                $q->bind_param('isss', $uid, $nombre, $banco, $tipo);
+            } else {
+                $q = $mysql->prepare("INSERT INTO lugares_guardado (IdUsuario, Nombre) VALUES (?, ?)");
+                $q->bind_param('is', $uid, $nombre);
+            }
             $q->execute();
             echo json_encode(['id' => $mysql->insert_id]);
+            break;
+
+        case 'actualizar': // nombre + clasificación (banco y tipo) de un lugar
+            $id = appfinanzas_entero($d['idLugar'] ?? null);
+            $nombre = nombreLugarValido($d['nombre'] ?? '');
+            if ($id === null || $id <= 0 || $nombre === null) { echo json_encode(['error' => 'Datos no válidos']); break; }
+            if (lugaresTieneClasificacion()) {
+                $banco = bancoLugarValido($d['banco'] ?? null); $tipo = tipoLugarValido($d['tipo'] ?? 'Bolsillo');
+                $q = $mysql->prepare("UPDATE lugares_guardado SET Nombre = ?, Banco = ?, Tipo = ? WHERE idLugar = ? AND IdUsuario = ?");
+                $q->bind_param('sssii', $nombre, $banco, $tipo, $id, $uid);
+            } else {
+                $q = $mysql->prepare("UPDATE lugares_guardado SET Nombre = ? WHERE idLugar = ? AND IdUsuario = ?");
+                $q->bind_param('sii', $nombre, $id, $uid);
+            }
+            $q->execute();
+            echo json_encode(['updated' => true]);
             break;
 
         case 'renombrar':
