@@ -1,5 +1,8 @@
 # Changelog · Backend
 
+## 2026-11-02 — Notas rápidas (solo app)
+Sin cambios en el servidor: las notas rápidas se guardan localmente en el teléfono (ver CHANGELOG de la app). Sincronizarlas entre dispositivos requeriría una tabla `notas_rapidas` por usuario.
+
 ## 2026-10-28 — «Por pagar» y «Previsto» correctos
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|

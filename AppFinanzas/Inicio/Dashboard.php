@@ -86,7 +86,7 @@ if ($p) {
 
     $stmt = $mysql->prepare("SELECT e.NombreEstado AS estado, COUNT(*) AS n,
             COALESCE(SUM(g.CostoPrevisto),0) AS previsto, COALESCE(SUM(" . sqlValorEfectivoGasto() . "),0) AS pagado, COALESCE(SUM(" . sqlSeparadoGasto() . "),0) AS separado,
-            COALESCE(SUM(GREATEST(g.CostoPrevisto - " . sqlValorEfectivoGasto() . ", 0)),0) AS falta
+            COALESCE(SUM(CASE WHEN e.NombreEstado IN ('Pendiente','En proceso','Acumulado') THEN GREATEST(g.CostoPrevisto - " . sqlValorEfectivoGasto() . ", 0) ELSE 0 END),0) AS falta
         FROM gastos g INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = ?
         WHERE g.idPresupuesto = ? GROUP BY e.NombreEstado");
     $stmt->bind_param('ii', $uid, $idPresupuesto);
@@ -95,7 +95,7 @@ if ($p) {
         $presupuesto['gastosTotal'] += (int)$f['n'];
         if ($f['estado'] === 'No aplica') continue;   // «No aplica»: no se espera ni se paga este mes, no entra en previsto ni por pagar
         $presupuesto['previsto'] += (float)$f['previsto'];
-        $presupuesto['porPagar'] += (float)$f['falta']; // lo que falta de CADA gasto (un gasto pagado de más no compensa a otro sin pagar)
+        $presupuesto['porPagar'] += (float)$f['falta']; // lo que falta de CADA gasto abierto (Pendiente, En proceso, Acumulado incompleto); Pagado/Guardado se dan por resueltos. Detalle: DetalleCifra.php
         $presupuesto['pagado'] += (float)$f['pagado'];
         if (in_array($f['estado'], ['Guardado', 'Acumulado'], true)) $presupuesto['ahorrado'] += (float)$f['separado'];
         if ($f['estado'] === 'Guardado') { $presupuesto['guardado'] += (float)$f['separado']; $presupuesto['guardadoPrevisto'] += (float)$f['previsto']; }
