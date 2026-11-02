@@ -25,6 +25,23 @@ function validarMovimiento($data) {
     return null;
 }
 
+/**
+ * Moneda del movimiento: valorMovimiento SIEMPRE son pesos (lo que cuenta el presupuesto). Si es en dólares se recibe
+ * además el valor en dólares (valorOriginal); la tasa se calcula aquí (pesos / dólares) y no se confía en la del cliente.
+ * Devuelve [moneda, valorOriginal|null, tasa|null, error|null].
+ */
+function leerMonedaMovimiento($data) {
+    $moneda = strtoupper(trim((string)($data['moneda'] ?? 'COP')));
+    if ($moneda === 'COP' || $moneda === '') return ['COP', null, null, null];
+    if ($moneda !== 'USD') return [null, null, null, 'Moneda no válida'];
+    if (!movimientosTieneMoneda()) return [null, null, null, 'Falta ejecutar la migración 026 (movimientos en dólares) en la base de datos.'];
+    $orig = $data['valorOriginal'] ?? null;
+    if (!is_numeric($orig) || (float)$orig <= 0 || (float)$orig >= 1000000000) return [null, null, null, 'El valor en dólares no es válido'];
+    $orig = round((float)$orig, 2);
+    $tasa = round(abs((float)$data['valorMovimiento']) / $orig, 4);
+    return ['USD', $orig, $tasa, null];
+}
+
 // Condición de pertenencia: movimientos -> gastos -> presupuestos.IdUsuario (los movimientos no tienen dueño propio).
 const SQL_MOVIMIENTO_PROPIO = "FROM movimientos m INNER JOIN gastos g ON g.idGastos = m.idGasto
                 INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto";
@@ -40,9 +57,17 @@ function procesarMovimiento($data) {
                 if ($error = validarMovimiento($data)) { echo json_encode(['error' => $error]); break; }
                 // El gasto debe ser del usuario (no se revela si existe para otro usuario).
                 if (!appfinanzas_gasto_es_propio($data['idGasto'])) { echo json_encode(['error' => 'El gasto asociado no existe']); break; }
-                $stmt = $mysql->prepare("INSERT INTO movimientos (tipoMovimiento, valorMovimiento, nombreGasto, observacionMovimiento, fechaMovimiento, idGasto) VALUES (?, ?, ?, ?, ?, ?)");
-                if (!$stmt) throw new Exception($mysql->error);
-                $stmt->bind_param('sdsssi', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto']);
+                list($moneda, $valorOrig, $tasa, $errMon) = leerMonedaMovimiento($data);
+                if ($errMon) { echo json_encode(['error' => $errMon]); break; }
+                if (movimientosTieneMoneda()) {
+                    $stmt = $mysql->prepare("INSERT INTO movimientos (tipoMovimiento, valorMovimiento, nombreGasto, observacionMovimiento, fechaMovimiento, idGasto, Moneda, ValorOriginal, TasaCambio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    if (!$stmt) throw new Exception($mysql->error);
+                    $stmt->bind_param('sdsssisdd', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto'], $moneda, $valorOrig, $tasa);
+                } else {
+                    $stmt = $mysql->prepare("INSERT INTO movimientos (tipoMovimiento, valorMovimiento, nombreGasto, observacionMovimiento, fechaMovimiento, idGasto) VALUES (?, ?, ?, ?, ?, ?)");
+                    if (!$stmt) throw new Exception($mysql->error);
+                    $stmt->bind_param('sdsssi', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto']);
+                }
                 $stmt->execute();
                 $idNuevo = $mysql->insert_id;
                 sincronizarGasto($data['idGasto']);
@@ -64,9 +89,17 @@ function procesarMovimiento($data) {
                 if (!appfinanzas_gasto_es_propio($data['idGasto'])) { echo json_encode(['error' => 'El gasto asociado no existe']); break; }
                 // Los triggers de movimientos actualizan gastos, así que MySQL no permite usar gastos (JOIN/subconsulta) en este
                 // mismo UPDATE: la propiedad del movimiento ya quedó verificada arriba con el SELECT por usuario.
-                $stmt = $mysql->prepare("UPDATE movimientos SET tipoMovimiento = ?, valorMovimiento = ?, nombreGasto = ?, observacionMovimiento = ?, fechaMovimiento = ?, idGasto = ? WHERE idMovimiento = ?");
-                if (!$stmt) throw new Exception($mysql->error);
-                $stmt->bind_param('sdsssii', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto'], $data['idMovimiento']);
+                list($moneda, $valorOrig, $tasa, $errMon) = leerMonedaMovimiento($data);
+                if ($errMon) { echo json_encode(['error' => $errMon]); break; }
+                if (movimientosTieneMoneda()) {
+                    $stmt = $mysql->prepare("UPDATE movimientos SET tipoMovimiento = ?, valorMovimiento = ?, nombreGasto = ?, observacionMovimiento = ?, fechaMovimiento = ?, idGasto = ?, Moneda = ?, ValorOriginal = ?, TasaCambio = ? WHERE idMovimiento = ?");
+                    if (!$stmt) throw new Exception($mysql->error);
+                    $stmt->bind_param('sdsssisddi', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto'], $moneda, $valorOrig, $tasa, $data['idMovimiento']);
+                } else {
+                    $stmt = $mysql->prepare("UPDATE movimientos SET tipoMovimiento = ?, valorMovimiento = ?, nombreGasto = ?, observacionMovimiento = ?, fechaMovimiento = ?, idGasto = ? WHERE idMovimiento = ?");
+                    if (!$stmt) throw new Exception($mysql->error);
+                    $stmt->bind_param('sdsssii', $data['tipoMovimiento'], $data['valorMovimiento'], $data['nombreGasto'], $data['observacionMovimiento'], $data['fechaMovimiento'], $data['idGasto'], $data['idMovimiento']);
+                }
                 $stmt->execute();
                 $actualizado = $stmt->affected_rows > 0;
                 sincronizarGasto($data['idGasto']);
@@ -124,7 +157,10 @@ function consultarMovimientos() {
                 "nombreGasto" => $row['nombreGasto'],
                 "observacionMovimiento" => $row['observacionMovimiento'],
                 "fechaMovimiento" => $row['fechaMovimiento'],
-                "idGasto" => $row['idGasto']
+                "idGasto" => $row['idGasto'],
+                "moneda" => $row['Moneda'] ?? 'COP',
+                "valorOriginal" => isset($row['ValorOriginal']) ? (float)$row['ValorOriginal'] : null,
+                "tasaCambio" => isset($row['TasaCambio']) ? (float)$row['TasaCambio'] : null
             ];
         }
         echo json_encode($response);
@@ -154,7 +190,10 @@ function consultarMovimientoId($id) {
                     "observacionMovimiento" => $row['observacionMovimiento'],
                     "fechaMovimiento" => $row['fechaMovimiento'],
                     "idGasto" => $row['idGasto'],
-                    "idCategoria"=> $row['idCategoria']
+                    "idCategoria"=> $row['idCategoria'],
+                    "moneda" => $row['Moneda'] ?? 'COP',
+                    "valorOriginal" => isset($row['ValorOriginal']) ? (float)$row['ValorOriginal'] : null,
+                    "tasaCambio" => isset($row['TasaCambio']) ? (float)$row['TasaCambio'] : null
                 ];
             }
             echo json_encode($response);
@@ -187,7 +226,10 @@ function consultarMovimientosPorPresupuesto($idPresupuesto) {
                     "observacionMovimiento" => $row['observacionMovimiento'],
                     "fechaMovimiento" => $row['fechaMovimiento'],
                     "idGasto" => $row['idGasto'],
-                    "idCategoria"=> $row['idCategoria']
+                    "idCategoria"=> $row['idCategoria'],
+                    "moneda" => $row['Moneda'] ?? 'COP',
+                    "valorOriginal" => isset($row['ValorOriginal']) ? (float)$row['ValorOriginal'] : null,
+                    "tasaCambio" => isset($row['TasaCambio']) ? (float)$row['TasaCambio'] : null
                 ];
             }
             echo json_encode($response);

@@ -147,12 +147,22 @@ function estadoGastoPorNombre($nombre) {
 
 // Mantiene movimientos_deuda alineado con un movimiento del presupuesto:
 // si el gasto está vinculado a una deuda, el movimiento es un abono a esa deuda.
+// true si la deuda del usuario es una tarjeta de crédito (las únicas que admiten saldo en dólares).
+function deudaEsTarjeta($idDeuda) {
+    global $mysql, $uid;
+    $q = $mysql->prepare("SELECT 1 FROM deudas WHERE idDeuda = ? AND IdUsuario = ? AND Tipo = 'Tarjeta'");
+    $q->bind_param('ii', $idDeuda, $uid);
+    $q->execute();
+    return $q->get_result()->num_rows > 0;
+}
+
 function sincronizarAbonoMovimiento($idMovimiento) {
     global $mysql, $uid;
     $idMovimiento = (int)$idMovimiento;
     // El movimiento debe ser del usuario (movimientos -> gastos -> presupuestos) y la deuda también (si no, se trata como sin deuda).
     // Si el gasto no está vinculado a una deuda pero el movimiento ya tiene un abono (pago «desde un bolsillo»), ese abono se conserva.
-    $stmt = $mysql->prepare("SELECT m.valorMovimiento, m.tipoMovimiento, m.fechaMovimiento, m.nombreGasto,
+    $colMon = movimientosTieneMoneda() ? "m.Moneda AS MonedaMov, m.ValorOriginal" : "'COP' AS MonedaMov, NULL AS ValorOriginal";
+    $stmt = $mysql->prepare("SELECT m.valorMovimiento, m.tipoMovimiento, m.fechaMovimiento, m.nombreGasto, $colMon,
             COALESCE(d.idDeuda, (SELECT md0.idDeuda FROM movimientos_deuda md0 INNER JOIN deudas d0 ON d0.idDeuda = md0.idDeuda
                                   WHERE md0.idMovimiento = m.idMovimiento AND d0.IdUsuario = p.IdUsuario AND g.idDeuda IS NULL LIMIT 1)) AS idDeuda
         FROM movimientos m INNER JOIN gastos g ON g.idGastos = m.idGasto
@@ -171,11 +181,23 @@ function sincronizarAbonoMovimiento($idMovimiento) {
         $del->execute();
         return;
     }
-    $stmt = $mysql->prepare("INSERT INTO movimientos_deuda (idDeuda, Tipo, Valor, Fecha, Nota, idMovimiento)
-        VALUES (?, 'Abono', ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE idDeuda = VALUES(idDeuda), Valor = VALUES(Valor), Fecha = VALUES(Fecha), Nota = VALUES(Nota)");
-    $valor = (float)$m['valorMovimiento'];
-    $stmt->bind_param('idssi', $m['idDeuda'], $valor, $m['fechaMovimiento'], $m['nombreGasto'], $idMovimiento);
+    // Movimiento en dólares sobre una tarjeta: el abono queda en DÓLARES en la tarjeta (su saldo en USD baja) y en el presupuesto
+    // ya cuenta los pesos reales. Cualquier otra deuda (o sin migración 026/018) recibe el abono en pesos, como siempre.
+    $usd = $m['MonedaMov'] === 'USD' && (float)$m['ValorOriginal'] > 0 && deudaTieneMoneda() && deudaEsTarjeta((int)$m['idDeuda']);
+    if (deudaTieneMoneda()) {
+        $stmt = $mysql->prepare("INSERT INTO movimientos_deuda (idDeuda, Tipo, Valor, Fecha, Nota, idMovimiento, Moneda)
+            VALUES (?, 'Abono', ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE idDeuda = VALUES(idDeuda), Valor = VALUES(Valor), Fecha = VALUES(Fecha), Nota = VALUES(Nota), Moneda = VALUES(Moneda)");
+        $valor = $usd ? (float)$m['ValorOriginal'] : (float)$m['valorMovimiento'];
+        $moneda = $usd ? 'USD' : 'COP';
+        $stmt->bind_param('idssis', $m['idDeuda'], $valor, $m['fechaMovimiento'], $m['nombreGasto'], $idMovimiento, $moneda);
+    } else {
+        $stmt = $mysql->prepare("INSERT INTO movimientos_deuda (idDeuda, Tipo, Valor, Fecha, Nota, idMovimiento)
+            VALUES (?, 'Abono', ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE idDeuda = VALUES(idDeuda), Valor = VALUES(Valor), Fecha = VALUES(Fecha), Nota = VALUES(Nota)");
+        $valor = (float)$m['valorMovimiento'];
+        $stmt->bind_param('idssi', $m['idDeuda'], $valor, $m['fechaMovimiento'], $m['nombreGasto'], $idMovimiento);
+    }
     $stmt->execute();
 }
 
@@ -219,6 +241,18 @@ function registrarPagoGasto($idGasto, $observaciones = null) {
 // ---------------------------------------------------------------- Deudas
 
 // Migración 018: monedas en las deudas (movimientos_deuda.Moneda y deudas.SaldoInicialUsd). Sin ella todo es COP.
+// true si ya se ejecutó la migración 026 (movimientos del presupuesto con moneda original en dólares).
+function movimientosTieneMoneda() {
+    global $mysql;
+    static $tiene = null;
+    if ($tiene === null) {
+        $r = $mysql->query("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema = DATABASE()
+            AND table_name = 'movimientos' AND column_name IN ('Moneda','ValorOriginal','TasaCambio')");
+        $tiene = $r && (int)$r->fetch_assoc()['n'] === 3;
+    }
+    return $tiene;
+}
+
 function deudaTieneMoneda() {
     global $mysql;
     static $tiene = null;

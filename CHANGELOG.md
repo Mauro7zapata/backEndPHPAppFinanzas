@@ -1,5 +1,12 @@
 # Changelog · Backend
 
+## 2026-11-02 — Movimientos del presupuesto en dólares (migración 026)
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Columnas | sql/026_movimientos_moneda.sql (nuevo) | `movimientos.Moneda`, `ValorOriginal`, `TasaCambio` (idempotente) | Registrar gastos en dólares con su equivalente en pesos | **Ejecutar con respaldo**; los movimientos existentes quedan en COP |
+| API | Presupuesto/Movimientos.php | Crear/actualizar aceptan `moneda` y `valorOriginal`; la tasa la calcula el servidor (pesos/dólares); los listados devuelven los 3 campos. Sin la migración, USD se rechaza con aviso claro | Datos confiables | `valorMovimiento` sigue en pesos: ningún cálculo del presupuesto cambia |
+| Abono a tarjeta | lib.php (`sincronizarAbonoMovimiento`, `deudaEsTarjeta`, `movimientosTieneMoneda`) | Si el movimiento es en dólares y el gasto está vinculado a una tarjeta, el abono queda en DÓLARES en la tarjeta (baja su saldo en USD); otras deudas reciben pesos | Ver en la tarjeta lo pagado en dólares | Requiere migraciones 018 y 026 |
+
 ## 2026-11-02 — No crear presupuesto con uno anterior sin finalizar
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|
