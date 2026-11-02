@@ -51,8 +51,9 @@ function insertarPresupuesto($data) {
         return;
     }
 
-    // Cierre de mes: si un mes ya terminado sigue sin finalizar, no se crean presupuestos nuevos hasta cerrarlo.
-    if ($pendiente = presupuestoPendienteDeCierre()) {
+    // Cierre de mes: no se crea un presupuesto mientras exista uno anterior (con gastos) sin finalizar,
+    // aunque ese mes todavía no haya terminado. Así los meses se cierran en orden.
+    if ($pendiente = presupuestoPendienteDeCierre($d["mes"], $d["anho"])) {
         enviarRespuesta("error", "Antes de crear un presupuesto nuevo, finaliza el de " . nombreMesEs($pendiente['mes']) . " " . $pendiente['anho'] .
             ": ábrelo y usa «Finalizar presupuesto», o termina de pagar y acumular sus gastos pendientes.",
             ["bloqueado" => true, "mesPendiente" => $pendiente['mes'], "anhoPendiente" => $pendiente['anho']]);

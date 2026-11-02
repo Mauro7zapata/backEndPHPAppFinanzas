@@ -1,5 +1,10 @@
 # Changelog · Backend
 
+## 2026-11-02 — No crear presupuesto con uno anterior sin finalizar
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Bloqueo al crear | AppFinanzas/lib.php (`presupuestoPendienteDeCierre($mes,$anho)`), Presupuesto/Presupuestos.php | Antes solo bloqueaba si existía un mes ya terminado sin finalizar; ahora, al crear, bloquea si hay cualquier presupuesto anterior al nuevo (con gastos) sin finalizar, aunque su mes siga en curso | Permitía crear el siguiente sin cerrar el anterior | Los meses se cierran en orden; no se puede preparar el mes siguiente por adelantado. El tablero no cambia (sin argumentos se comporta igual) |
+
 ## 2026-11-02 — Notas rápidas (solo app)
 Sin cambios en el servidor: las notas rápidas se guardan localmente en el teléfono (ver CHANGELOG de la app). Sincronizarlas entre dispositivos requeriría una tabla `notas_rapidas` por usuario.
 

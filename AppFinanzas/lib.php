@@ -732,11 +732,17 @@ function presupuestoCerradoManual($idPresupuesto) {
 }
 
 // Presupuesto más antiguo cuyo mes financiero ya terminó, que tiene gastos y no está finalizado: ['mes','anho'] o null.
-function presupuestoPendienteDeCierre() {
+function presupuestoPendienteDeCierre($mesObjetivo = null, $anhoObjetivo = null) {
     global $mysql, $uid;
     if (!presupuestosTieneEstado()) return null;
-    [$mesAct, $anhoAct] = mesFinanciero(date('Y-m-d'), parametroApp('dia_inicio_mes'));
-    $indice = $anhoAct * 12 + $mesAct;
+    // Sin objetivo: se compara contra el mes financiero actual (tablero). Con objetivo (al crear un presupuesto):
+    // cualquier presupuesto anterior al que se va a crear, con gastos y sin finalizar, bloquea la creación.
+    if ($mesObjetivo !== null && $anhoObjetivo !== null) {
+        $indice = (int)$anhoObjetivo * 12 + (int)$mesObjetivo;
+    } else {
+        [$mesAct, $anhoAct] = mesFinanciero(date('Y-m-d'), parametroApp('dia_inicio_mes'));
+        $indice = $anhoAct * 12 + $mesAct;
+    }
     $fin = estadoPresupuestoPorNombre('Finalizado');
     $stmt = $mysql->prepare("SELECT p.idPresupuesto, p.Mes, p.Anho FROM presupuestos p
         WHERE p.IdUsuario = ? AND p.Anho * 12 + p.Mes < ? AND (p.IdEstado IS NULL OR p.IdEstado <> ?)
