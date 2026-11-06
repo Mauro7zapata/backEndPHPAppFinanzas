@@ -1,5 +1,11 @@
 # Changelog · Backend
 
+## 2026-11-05 — Plantilla: solo lo que falta y sin duplicar provisiones
+| Funcionalidad | Archivo | Cambio | Motivo | Impacto |
+|---|---|---|---|---|
+| Sugerencias | Presupuesto/Plantilla.php (`gastosFrecuentes`, `clavesDelPresupuesto`) | Descarta los gastos que el presupuesto destino ya tiene (nombre+categoría) y las provisiones antiguas «Provisión: …» | Con el presupuesto creado se mostraba toda la plantilla como pendiente | La hoja solo lista lo que realmente falta |
+| Provisiones | lib.php (`provisionarObligaciones`) | Además de `idObligacion`, omite si ya existe un gasto con el mismo nombre de provisión (cualquier estado, p. ej. Acumulado) | Se recreaban provisiones ya existentes | No se duplican; sin cambio de BD |
+
 ## 2026-11-02 — Movimientos del presupuesto en dólares (migración 026)
 | Funcionalidad | Archivo | Cambio | Motivo | Impacto |
 |---|---|---|---|---|

@@ -546,8 +546,11 @@ function provisionarObligaciones($mes, $anho, $idPresupuesto) {
         $indiceVenc = (int)$v->format('Y') * 12 + (int)$v->format('n');
         if ($indiceVenc < $anho * 12 + $mes) { $omitidos++; continue; } // ya venció: ver alertas
 
-        $chk = $mysql->prepare("SELECT COUNT(*) c FROM gastos WHERE idPresupuesto = ? AND idObligacion = ?");
-        $chk->bind_param('ii', $idPresupuesto, $o['idObligacion']);
+        // Ya provisionada si hay un gasto ligado a la obligación (cualquier estado, p. ej. Acumulado) o con el mismo nombre
+        // de provisión (cubre provisiones antiguas sin idObligacion o creadas a mano).
+        $nombreProv = mb_substr('Provisión: ' . $o['Nombre'], 0, 100, 'UTF-8');
+        $chk = $mysql->prepare("SELECT COUNT(*) c FROM gastos WHERE idPresupuesto = ? AND (idObligacion = ? OR NombreGasto = ?)");
+        $chk->bind_param('iis', $idPresupuesto, $o['idObligacion'], $nombreProv);
         $chk->execute();
         if ((int)$chk->get_result()->fetch_assoc()['c'] > 0) { $omitidos++; continue; }
 

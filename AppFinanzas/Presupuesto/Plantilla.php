@@ -50,6 +50,18 @@ function plantillaMarcados() {
     return $m;
 }
 
+// Claves (nombre|categoría) de los gastos que ya tiene un presupuesto del usuario.
+function clavesDelPresupuesto($idPresupuesto) {
+    global $mysql, $uid;
+    $claves = [];
+    $stmt = $mysql->prepare("SELECT g.NombreGasto, g.IdCategoria FROM gastos g INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
+        WHERE g.idPresupuesto = ? AND p.IdUsuario = ?");
+    $stmt->bind_param('ii', $idPresupuesto, $uid);
+    $stmt->execute();
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $f) $claves[claveGasto($f['NombreGasto'], $f['IdCategoria'])] = true;
+    return $claves;
+}
+
 function gastosFrecuentes($mes, $anho) {
     global $mysql, $uid;
     $indice = $anho * 12 + $mes;
@@ -72,7 +84,7 @@ function gastosFrecuentes($mes, $anho) {
         INNER JOIN presupuestos p ON p.idPresupuesto = g.idPresupuesto
         INNER JOIN estados e ON e.idEstado = g.IdEstado AND e.IdUsuario = p.IdUsuario
         INNER JOIN categoriagastos c ON c.idCategoriaGastos = g.IdCategoria AND c.IdUsuario = p.IdUsuario
-        WHERE g.idPresupuesto IN ($lista) AND p.IdUsuario = ? AND e.NombreEstado <> 'No aplica' AND g.idObligacion IS NULL
+        WHERE g.idPresupuesto IN ($lista) AND p.IdUsuario = ? AND e.NombreEstado <> 'No aplica' AND g.idObligacion IS NULL AND g.NombreGasto NOT LIKE 'Provisión: %'
         ORDER BY (p.Anho * 12 + p.Mes) DESC, g.idGastos DESC");
     $stmt->bind_param('i', $uid);
     $stmt->execute();
@@ -108,6 +120,14 @@ function gastosFrecuentes($mes, $anho) {
         $g['mesesAnalizados'] = count($ids);
         unset($g['meses']);
         $salida[] = $g;
+    }
+    // Solo se ofrece lo que falta: se descartan los gastos que el presupuesto destino ya tiene.
+    $idDestino = buscarPresupuesto($mes, $anho);
+    if ($idDestino !== null) {
+        $ya = clavesDelPresupuesto($idDestino);
+        $salida = array_values(array_filter($salida, function ($g) use ($ya) {
+            return !isset($ya[claveGasto($g['nombre'], $g['idCategoria'])]);
+        }));
     }
     usort($salida, function ($a, $b) {
         return [$b['frecuencia'], $a['nombreCategoria'], $a['nombre']] <=> [$a['frecuencia'], $b['nombreCategoria'], $b['nombre']];
